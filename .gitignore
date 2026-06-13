@@ -1,0 +1,35 @@
+# macOS Finder metadata
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Icon files
+Icon?
+
+# Thumbnails
+._*
+
+# Spotlight
+.Spotlight-V100
+
+# Trash
+.Trashes
+
+# Network filesystem metadata
+.fseventsd
+
+# macOS volume metadata
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# AFP / SMB share metadata
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# Editor / OS cruft
+*.swp
+*.swo
+*~
