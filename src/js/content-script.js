@@ -684,43 +684,60 @@
         }
     };
 
-    const beginDrag = (event) => {
-        if (!controlsDiv || event.button !== 0) return;
-        if (event.target.closest('button')) return;
+const beginDrag = (event) => {
+    if (!controlsDiv || event.button !== 0) return;
+    if (event.target.closest('button')) return;
 
-        const rect = controlsDiv.getBoundingClientRect();
-        const offsetX = event.clientX - rect.left;
-        const offsetY = event.clientY - rect.top;
+    const clickStartedOnTitle = event.target === trackTitleLabel || trackTitleLabel?.contains(event.target);
 
-        controlsDiv.style.left = `${rect.left}px`;
-        controlsDiv.style.top = `${rect.top}px`;
-        controlsDiv.style.transform = 'none';
+    const startClientX = event.clientX;
+    const startClientY = event.clientY;
+    let didDrag = false;
 
-        const onMouseMove = (moveEvent) => {
-            const width = controlsDiv.offsetWidth;
-            const height = controlsDiv.offsetHeight;
-            const nextLeft = Math.min(
-                Math.max(12, moveEvent.clientX - offsetX),
-                Math.max(12, window.innerWidth - width - 12)
-            );
-            const nextTop = Math.min(
-                Math.max(12, moveEvent.clientY - offsetY),
-                Math.max(12, window.innerHeight - height - 12)
-            );
+    const rect = controlsDiv.getBoundingClientRect();
+    const offsetX = event.clientX - rect.left;
+    const offsetY = event.clientY - rect.top;
 
-            controlsDiv.style.left = `${nextLeft}px`;
-            controlsDiv.style.top = `${nextTop}px`;
-        };
+    controlsDiv.style.left = `${rect.left}px`;
+    controlsDiv.style.top = `${rect.top}px`;
+    controlsDiv.style.transform = 'none';
 
-        const onMouseUp = () => {
-            document.removeEventListener('mousemove', onMouseMove);
-            document.removeEventListener('mouseup', onMouseUp);
-        };
+    const onMouseMove = (moveEvent) => {
+        const movementX = moveEvent.clientX - startClientX;
+        const movementY = moveEvent.clientY - startClientY;
 
-        document.addEventListener('mousemove', onMouseMove);
-        document.addEventListener('mouseup', onMouseUp);
-        event.preventDefault();
+        if (Math.hypot(movementX, movementY) > 4) {
+            didDrag = true;
+        }
+
+        const width = controlsDiv.offsetWidth;
+        const height = controlsDiv.offsetHeight;
+        const nextLeft = Math.min(
+            Math.max(12, moveEvent.clientX - offsetX),
+            Math.max(12, window.innerWidth - width - 12)
+        );
+        const nextTop = Math.min(
+            Math.max(12, moveEvent.clientY - offsetY),
+            Math.max(12, window.innerHeight - height - 12)
+        );
+
+        controlsDiv.style.left = `${nextLeft}px`;
+        controlsDiv.style.top = `${nextTop}px`;
     };
+
+    const onMouseUp = () => {
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+
+        if (clickStartedOnTitle && !didDrag) {
+            toggleCollapsed();
+        }
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+    event.preventDefault();
+};
 
     const createSpeedMenu = () => {
         const theme = getPlayerTheme();
@@ -803,6 +820,15 @@
 
         trackTitleLabel = document.createElement('div');
         trackTitleLabel.style.cssText = `min-width:0;font-size:14px;font-weight:650;line-height:1.25;letter-spacing:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:${theme.titleText};`;
+        trackTitleLabel.setAttribute('role', 'button');
+        trackTitleLabel.setAttribute('tabindex', '0');
+        trackTitleLabel.setAttribute('aria-label', 'Toggle timeline');
+        trackTitleLabel.title = 'Drag to move. Click to show or hide timeline.';
+        trackTitleLabel.onkeydown = (event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            toggleCollapsed();
+        };
 
         const playbackGroup = document.createElement('div');
         playbackGroup.style.cssText = 'display:flex;justify-content:center;align-items:center;gap:6px;';
