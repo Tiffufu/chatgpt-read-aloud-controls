@@ -45,6 +45,7 @@
     let speedBtn = null;
     let speedMenu = null;
     let minimizeBtn = null;
+    let timesRowDiv = null;
     let monitorIntervalId = null;
     let uiSyncIntervalId = null;
     let audioTrackingInstalled = false;
@@ -63,6 +64,63 @@
 
     const speedOptions = [0.75, 1, 1.25, 1.5];
     const isTestMode = /(?:^|\/)test\.html(?:[?#]|$)/i.test(window.location.href);
+    const testThemeOverride = (() => {
+        if (!isTestMode) return '';
+        try {
+            const value = new URLSearchParams(window.location.search).get('ae-theme');
+            return value === 'light' || value === 'dark' ? value : '';
+        } catch (_err) {
+            return '';
+        }
+    })();
+    const playerThemes = {
+        light: {
+            surface: '#f4f4f1',
+            menuSurface: '#fffefa',
+            border: 'rgba(0,0,0,0.14)',
+            shadow: '0 16px 36px rgba(0,0,0,0.18)',
+            text: '#1f1f1f',
+            titleText: '#202020',
+            mutedText: '#5f6368',
+            accent: '#8a6d00',
+            buttonHover: 'rgba(0,0,0,0.08)',
+            dangerHover: 'rgba(220,38,38,0.11)',
+            speedButtonBg: '#fff0b8',
+            speedButtonText: '#4f4100',
+            speedButtonHover: '#f7e6a0',
+            speedMenuText: '#2f2f2f',
+            speedMenuActiveText: '#3f3400',
+            speedMenuActiveBg: '#fff2bf',
+            speedMenuHover: 'rgba(0,0,0,0.07)'
+        },
+        dark: {
+            surface: '#28292b',
+            menuSurface: 'rgba(39,40,42,0.98)',
+            border: 'rgba(255,255,255,0.16)',
+            shadow: '0 16px 36px rgba(0,0,0,0.30)',
+            text: '#f3f0e9',
+            titleText: '#ebe7dd',
+            mutedText: '#d7dce4',
+            accent: '#fff5c7',
+            buttonHover: 'rgba(255,255,255,0.12)',
+            dangerHover: 'rgba(255,95,86,0.18)',
+            speedButtonBg: 'rgba(255,255,255,0.10)',
+            speedButtonText: '#fff5c7',
+            speedButtonHover: 'rgba(255,255,255,0.16)',
+            speedMenuText: '#f5f3ef',
+            speedMenuActiveText: '#fff7d6',
+            speedMenuActiveBg: 'rgba(255,255,255,0.08)',
+            speedMenuHover: 'rgba(255,255,255,0.10)'
+        }
+    };
+
+    const getPreferredThemeName = () => {
+        if (testThemeOverride) return testThemeOverride;
+        if (typeof window.matchMedia !== 'function') return 'dark';
+        return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    };
+
+    const getPlayerTheme = () => playerThemes[getPreferredThemeName()] || playerThemes.dark;
     const nakedButtonStyle = [
         'appearance:none',
         'background:none',
@@ -97,14 +155,21 @@
         download: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="size-6"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v10m0 0 4-4m-4 4-4-4M5 18h14" /></svg>'
     };
 
-    const setButtonHoverState = (button, hoverColor = 'rgba(255,255,255,0.12)') => {
+    const refreshButtonHoverState = (button, hoverToken) => {
         if (!button) return;
-        if (!button.dataset.idleBackground) {
-            button.dataset.idleBackground = button.style.backgroundColor || 'transparent';
-        }
+        const theme = getPlayerTheme();
+        const token = hoverToken || button.dataset.hoverToken || 'buttonHover';
+        button.dataset.hoverToken = token;
+        button.dataset.hoverColor = theme[token] || token;
+        button.dataset.idleBackground = button.style.backgroundColor || 'transparent';
+    };
+
+    const setButtonHoverState = (button, hoverToken = 'buttonHover') => {
+        if (!button) return;
+        refreshButtonHoverState(button, hoverToken);
         button.addEventListener('mouseenter', () => {
             if (button.disabled) return;
-            button.style.backgroundColor = hoverColor;
+            button.style.backgroundColor = button.dataset.hoverColor || getPlayerTheme().buttonHover;
             button.style.transform = 'translateY(-1px)';
         });
         button.addEventListener('mouseleave', () => {
@@ -120,7 +185,7 @@
         return 18;
     };
 
-    const setIconButton = (button, iconName, label, size = 24, hoverColor) => {
+    const setIconButton = (button, iconName, label, size = 24, hoverToken) => {
         button.type = 'button';
         button.innerHTML = iconMarkup[iconName] || '';
         button.dataset.iconName = iconName;
@@ -135,7 +200,7 @@
             svg.style.height = `${svgSize}px`;
             svg.style.display = 'block';
         }
-        setButtonHoverState(button, hoverColor);
+        setButtonHoverState(button, hoverToken);
     };
 
     const refreshIconButton = (button, iconName, label) => {
@@ -163,9 +228,9 @@
         }
     };
 
-    const createIconButton = (iconName, label, size = 24, hoverColor) => {
+    const createIconButton = (iconName, label, size = 24, hoverToken) => {
         const button = document.createElement('button');
-        setIconButton(button, iconName, label, size, hoverColor);
+        setIconButton(button, iconName, label, size, hoverToken);
         return button;
     };
 
@@ -280,14 +345,90 @@
         updateTrackTitle();
     };
 
+    const applyTheme = () => {
+        if (!controlsDiv) return;
+
+        const themeName = getPreferredThemeName();
+        const theme = getPlayerTheme();
+
+        controlsDiv.style.background = theme.surface;
+        controlsDiv.style.borderColor = theme.border;
+        controlsDiv.style.boxShadow = theme.shadow;
+        controlsDiv.style.color = theme.text;
+        controlsDiv.style.colorScheme = themeName;
+
+        if (titleBarDiv) {
+            titleBarDiv.style.background = theme.surface;
+        }
+
+        if (contentDiv) {
+            contentDiv.style.background = theme.surface;
+        }
+
+        if (trackTitleLabel) {
+            trackTitleLabel.style.color = theme.titleText;
+        }
+
+        if (speedBtn) {
+            speedBtn.style.background = theme.speedButtonBg;
+            speedBtn.style.color = theme.speedButtonText;
+            refreshButtonHoverState(speedBtn, 'speedButtonHover');
+        }
+
+        if (speedMenu) {
+            speedMenu.style.background = theme.menuSurface;
+            speedMenu.style.borderColor = theme.border;
+            speedMenu.style.boxShadow = theme.shadow;
+        }
+
+        if (seekStatusLabel) {
+            seekStatusLabel.style.color = theme.mutedText;
+        }
+
+        if (seekBar) {
+            seekBar.style.accentColor = theme.accent;
+        }
+
+        if (timesRowDiv) {
+            timesRowDiv.style.color = theme.mutedText;
+        }
+
+        if (controlsDiv) {
+            controlsDiv.querySelectorAll('button[data-hover-token]').forEach((button) => {
+                refreshButtonHoverState(button);
+            });
+        }
+
+        updateSpeedUi();
+    };
+
+    const installThemeListener = () => {
+        if (typeof window.matchMedia !== 'function') return;
+
+        const colorSchemeQuery = window.matchMedia('(prefers-color-scheme: dark)');
+        const onThemeChange = () => applyTheme();
+
+        if (typeof colorSchemeQuery.addEventListener === 'function') {
+            colorSchemeQuery.addEventListener('change', onThemeChange);
+            return;
+        }
+
+        if (typeof colorSchemeQuery.addListener === 'function') {
+            colorSchemeQuery.addListener(onThemeChange);
+        }
+    };
+
     const updateSpeedUi = () => {
+        const theme = getPlayerTheme();
         if (speedBtn) speedBtn.textContent = formatRate(playbackRate);
         if (!speedMenu) return;
 
         speedMenu.querySelectorAll('button[data-rate]').forEach((optionBtn) => {
             const isActive = Number(optionBtn.dataset.rate) === playbackRate;
             optionBtn.style.fontWeight = isActive ? '700' : '400';
-            optionBtn.style.color = isActive ? '#fff7d6' : '#f5f3ef';
+            optionBtn.style.color = isActive ? theme.speedMenuActiveText : theme.speedMenuText;
+            optionBtn.style.backgroundColor = isActive ? theme.speedMenuActiveBg : 'transparent';
+            refreshButtonHoverState(optionBtn, 'speedMenuHover');
         });
     };
 
@@ -419,6 +560,7 @@
         speedBtn = null;
         speedMenu = null;
         minimizeBtn = null;
+        timesRowDiv = null;
     };
 
     const closePlayer = () => {
@@ -480,6 +622,7 @@
     };
 
     const createSpeedMenu = () => {
+        const theme = getPlayerTheme();
         speedMenu = document.createElement('div');
         speedMenu.style.cssText = [
             'position:absolute',
@@ -488,10 +631,10 @@
             'display:none',
             'min-width:86px',
             'padding:6px',
-            'border:1px solid rgba(255,255,255,0.18)',
+            `border:1px solid ${theme.border}`,
             'border-radius:12px',
-            'background:rgba(24,24,24,0.98)',
-            'box-shadow:0 14px 28px rgba(0,0,0,0.34)',
+            `background:${theme.menuSurface}`,
+            `box-shadow:${theme.shadow}`,
             'z-index:2'
         ].join(';');
 
@@ -501,7 +644,7 @@
             optionBtn.dataset.rate = String(rate);
             optionBtn.textContent = formatRate(rate);
             optionBtn.style.cssText = `${nakedButtonStyle};display:block;width:100%;height:30px;padding:0 10px;border-radius:8px;text-align:left;font-size:13px;`;
-            setButtonHoverState(optionBtn, 'rgba(255,255,255,0.1)');
+            setButtonHoverState(optionBtn, 'speedMenuHover');
             optionBtn.onclick = (event) => {
                 event.stopPropagation();
                 applyPlaybackRate(rate);
@@ -515,6 +658,9 @@
     const buildControls = () => {
         if (controlsDiv) return;
 
+        const themeName = getPreferredThemeName();
+        const theme = getPlayerTheme();
+
         controlsDiv = document.createElement('div');
         controlsDiv.id = 'ae_enhanced_player';
         controlsDiv.style.cssText = [
@@ -526,12 +672,13 @@
             'width:min(560px, calc(100vw - 20px))',
             'border-radius:14px',
             'overflow:visible',
-            'border:1px solid rgba(255,255,255,0.16)',
-            'box-shadow:0 12px 28px rgba(0,0,0,0.34)',
-            'color:#f2f0ea',
+            `border:1px solid ${theme.border}`,
+            `box-shadow:${theme.shadow}`,
+            `color:${theme.text}`,
             'font-family:"Segoe UI", sans-serif',
             'font-size:14px',
-            'background:#202123',
+            `background:${theme.surface}`,
+            `color-scheme:${themeName}`,
             'box-sizing:border-box'
         ].join(';');
 
@@ -543,7 +690,7 @@
             'gap:10px',
             'min-height:52px',
             'padding:7px 10px 7px 14px',
-            'background:#202123',
+            `background:${theme.surface}`,
             'border-radius:14px 14px 0 0',
             'cursor:move',
             'user-select:none',
@@ -553,7 +700,7 @@
         titleBarDiv = titleBar;
 
         trackTitleLabel = document.createElement('div');
-        trackTitleLabel.style.cssText = 'min-width:0;font-size:15px;font-weight:650;letter-spacing:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#e8e4da;';
+        trackTitleLabel.style.cssText = `min-width:0;font-size:15px;font-weight:650;letter-spacing:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:${theme.titleText};`;
 
         const playbackGroup = document.createElement('div');
         playbackGroup.style.cssText = 'display:flex;justify-content:center;align-items:center;gap:6px;';
@@ -564,7 +711,7 @@
         minimizeBtn = createIconButton('collapse', 'Hide timeline', 36);
         minimizeBtn.onclick = toggleCollapsed;
 
-        const closeBtn = createIconButton('close', 'Close player', 36, 'rgba(255,95,86,0.18)');
+        const closeBtn = createIconButton('close', 'Close player', 36, 'dangerHover');
         closeBtn.onclick = closePlayer;
 
         contentDiv = document.createElement('div');
@@ -572,7 +719,7 @@
             'display:grid',
             'gap:4px',
             'padding:0 14px 8px',
-            'background:#202123',
+            `background:${theme.surface}`,
             'border-radius:0 0 14px 14px',
             'box-sizing:border-box'
         ].join(';');
@@ -580,8 +727,8 @@
         speedBtn = document.createElement('button');
         speedBtn.type = 'button';
         speedBtn.title = 'Playback speed';
-        speedBtn.style.cssText = `${nakedButtonStyle};height:28px;min-width:58px;padding:0 10px;border-radius:999px;background:rgba(255,255,255,0.08);font-size:13px;font-weight:650;color:#fff5c7;text-align:center;`;
-        setButtonHoverState(speedBtn, 'rgba(255,255,255,0.14)');
+        speedBtn.style.cssText = `${nakedButtonStyle};height:28px;min-width:58px;padding:0 10px;border-radius:999px;background:${theme.speedButtonBg};font-size:13px;font-weight:650;color:${theme.speedButtonText};text-align:center;`;
+        setButtonHoverState(speedBtn, 'speedButtonHover');
         speedBtn.onclick = (event) => {
             event.stopPropagation();
             if (!speedMenu) return;
@@ -593,7 +740,7 @@
         leftTimesContainer.append(speedBtn, createSpeedMenu());
 
         seekStatusLabel = document.createElement('div');
-        seekStatusLabel.style.cssText = 'display:none;text-align:center;font-size:13px;color:#d7dce4;white-space:nowrap;';
+        seekStatusLabel.style.cssText = `display:none;text-align:center;font-size:13px;color:${theme.mutedText};white-space:nowrap;`;
         seekStatusLabel.textContent = 'Loading seekbar...';
 
         seekBar = document.createElement('input');
@@ -601,14 +748,15 @@
         seekBar.min = '0';
         seekBar.max = '1000';
         seekBar.value = '0';
-        seekBar.style.cssText = 'width:100%;height:12px;margin:0;accent-color:#fff5c7;cursor:pointer;';
+        seekBar.style.cssText = `width:100%;height:12px;margin:0;accent-color:${theme.accent};cursor:pointer;`;
         seekBar.oninput = () => {
             if (!audio || !hasKnownDuration()) return;
             audio.currentTime = (Number(seekBar.value) / 1000) * audio.duration;
         };
 
         const timesRow = document.createElement('div');
-        timesRow.style.cssText = 'display:grid;grid-template-columns:auto minmax(0, 1fr) auto;align-items:center;font-size:13px;font-variant-numeric:tabular-nums;color:#d7dce4;gap:10px;min-height:28px;';
+        timesRow.style.cssText = `display:grid;grid-template-columns:auto minmax(0, 1fr) auto;align-items:center;font-size:13px;font-variant-numeric:tabular-nums;color:${theme.mutedText};gap:10px;min-height:28px;`;
+        timesRowDiv = timesRow;
 
         const timeGroup = document.createElement('div');
         timeGroup.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:4px;min-width:0;white-space:nowrap;';
@@ -681,6 +829,7 @@
         document.body.appendChild(controlsDiv);
 
         updateTrackTitle();
+        applyTheme();
         updateSpeedUi();
         updateControlState();
     };
@@ -874,6 +1023,8 @@
         if (speedMenu.contains(event.target) || speedBtn.contains(event.target)) return;
         closeSpeedMenu();
     });
+
+    installThemeListener();
 
     if (isTestMode) {
         initializeTestMode();
