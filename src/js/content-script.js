@@ -50,7 +50,7 @@
     let audioTrackingInstalled = false;
 
     let playbackRate = Number(localStorage.getItem('ae_playbackRate') || 1);
-    if (!Number.isFinite(playbackRate)) playbackRate = 1;
+    if (!Number.isFinite(playbackRate) || playbackRate <= 0) playbackRate = 1;
 
     let currentMimeType = 'audio/aac';
     let allChunks = [];
@@ -178,6 +178,15 @@
         return `${mins}:${secs}`;
     };
 
+    const getEffectivePlaybackRate = () => (
+        Number.isFinite(playbackRate) && playbackRate > 0 ? playbackRate : 1
+    );
+
+    const getSpeedAdjustedDuration = () => {
+        if (!hasKnownDuration()) return Number.NaN;
+        return audio.duration / getEffectivePlaybackRate();
+    };
+
     const getTrackTitle = () => {
         const title = `${document.title || 'Untitled'}`.trim();
         return title || 'Untitled';
@@ -295,7 +304,8 @@
         }
 
         if (durationLabel) {
-            durationLabel.textContent = formatTime(audio ? audio.duration : Number.NaN);
+            durationLabel.textContent = formatTime(getSpeedAdjustedDuration());
+            durationLabel.title = hasDuration ? `Total time at ${formatRate(getEffectivePlaybackRate())}` : '';
             durationLabel.style.display = hasDuration ? '' : 'none';
         }
 
@@ -352,6 +362,7 @@
         localStorage.setItem('ae_playbackRate', String(playbackRate));
         if (audio) audio.playbackRate = playbackRate;
         updateSpeedUi();
+        updateTimeDisplay();
         closeSpeedMenu();
     };
 
