@@ -1,28 +1,8 @@
-// ==UserScript==
-// @name        Audio Player for ChatGPT
-// @namespace   Violentmonkey Scripts
-// @match       https://chatgpt.com/*
-// @grant       none
-// @version     0.0.0.5
-// @author      Ian Speckart
-// @description https://github.com/ian-speckart/chatgpt-audio-player.git
-// ==/UserScript==
-
 /**
- * RUNTIMES:
- * The code in this file can run as a Chrome/Firefox extension, by installing
- * 'Audio Player for ChatGPT', or by copy/pasting this file in a script manager like
- * violentmonkey (ready to go).
+ * Floating player for ChatGPT Read Aloud.
  *
- * DESCRIPTION:
- * This file adds audio player controls when an audio element is being played with
- * the 'Read Aloud' feature of ChatGPT web.
- * 
- * NOTICE:
- * This extension is not affiliated with OpenAI. It was developed independently by Ian Speckart.
- * 
- * ATTRIBUTIONS:
- * See CREDITS.md
+ * This extension is not affiliated with OpenAI.
+ * See CREDITS.md for original project and third-party attributions.
  **/
 
 (function () {
@@ -58,14 +38,16 @@
     let isCollapsed = false;
     let dismissedPlaybackKey = null;
     let downloadStreamId = 0;
-    let trackTitleAtPlaybackStart = 'Untitled';
+    let trackTitleAtPlaybackStart = 'Read aloud';
     let trackTitlePlaybackKey = '';
     const observedAudioElements = new Set();
 
-    const speedOptions = [0.75, 1, 1.25, 1.5];
-    const isTestMode = /(?:^|\/)test\.html(?:[?#]|$)/i.test(window.location.href);
-    const testThemeOverride = (() => {
-        if (!isTestMode) return '';
+    const DEFAULT_TRACK_TITLE = 'Read aloud';
+    const PREVIEW_PATH_PATTERN = /(?:^|\/)preview\.html(?:[?#]|$)/i;
+    const speedOptions = [0.75, 1, 1.25, 1.5, 2];
+    const isPreviewMode = PREVIEW_PATH_PATTERN.test(window.location.href);
+    const previewThemeOverride = (() => {
+        if (!isPreviewMode) return '';
         try {
             const value = new URLSearchParams(window.location.search).get('ae-theme');
             return value === 'light' || value === 'dark' ? value : '';
@@ -125,7 +107,7 @@
     };
 
     const getPreferredThemeName = () => {
-        if (testThemeOverride) return testThemeOverride;
+        if (previewThemeOverride) return previewThemeOverride;
         if (typeof window.matchMedia !== 'function') return 'dark';
         return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
     };
@@ -262,10 +244,10 @@
                         var(--ae-seek-track-remaining) var(--ae-seek-progress),
                         var(--ae-seek-track-remaining) 100%
                     )
-                    center / 100% 8px no-repeat;
+                    center / 100% 7px no-repeat;
                 cursor: pointer;
                 direction: ltr;
-                height: 18px;
+                height: 20px;
                 margin: 0;
                 border-radius: 999px;
                 width: 100%;
@@ -279,7 +261,7 @@
                 background: transparent;
                 border: 0;
                 border-radius: 999px;
-                height: 8px;
+                height: 7px;
             }
 
             #ae_enhanced_player .ae_seek_bar::-webkit-slider-thumb {
@@ -289,9 +271,9 @@
                 border: 1px solid var(--ae-seek-thumb-border);
                 border-radius: 999px;
                 box-shadow: var(--ae-seek-thumb-shadow);
-                height: 18px;
-                margin-top: -6px;
-                width: 18px;
+                height: 16px;
+                margin-top: -4.5px;
+                width: 16px;
             }
 
             #ae_enhanced_player .ae_seek_bar:focus-visible::-webkit-slider-thumb {
@@ -302,13 +284,13 @@
                 background: transparent;
                 border: 0;
                 border-radius: 999px;
-                height: 8px;
+                height: 7px;
             }
 
             #ae_enhanced_player .ae_seek_bar::-moz-range-progress {
                 background: var(--ae-seek-track-elapsed);
                 border-radius: 999px;
-                height: 8px;
+                height: 7px;
             }
 
             #ae_enhanced_player .ae_seek_bar::-moz-range-thumb {
@@ -316,8 +298,8 @@
                 border: 1px solid var(--ae-seek-thumb-border);
                 border-radius: 999px;
                 box-shadow: var(--ae-seek-thumb-shadow);
-                height: 18px;
-                width: 18px;
+                height: 16px;
+                width: 16px;
             }
         `;
         (document.head || document.documentElement).appendChild(style);
@@ -356,8 +338,12 @@
     };
 
     const getTrackTitle = () => {
-        const title = `${document.title || 'Untitled'}`.trim();
-        return title || 'Untitled';
+        const title = `${document.title || ''}`
+            .replace(/\s+[-|–—]\s+ChatGPT$/i, '')
+            .replace(/^ChatGPT\s+[-|–—]\s+/i, '')
+            .trim();
+
+        return title || DEFAULT_TRACK_TITLE;
     };
 
     const isAudioElement = (element) => (
@@ -437,7 +423,7 @@
 
     const updateTrackTitle = () => {
         if (!trackTitleLabel) return;
-        const title = trackTitleAtPlaybackStart || 'Untitled';
+        const title = trackTitleAtPlaybackStart || DEFAULT_TRACK_TITLE;
         trackTitleLabel.textContent = title;
         trackTitleLabel.title = title;
     };
@@ -801,11 +787,11 @@
         const titleBar = document.createElement('div');
         titleBar.style.cssText = [
             'display:grid',
-            'grid-template-columns:minmax(0, 1fr) auto auto',
+            'grid-template-columns:minmax(120px, 1fr) auto auto',
             'align-items:center',
-            'gap:10px',
-            'min-height:52px',
-            'padding:7px 10px 7px 14px',
+            'gap:8px',
+            'min-height:50px',
+            'padding:7px 10px 7px 12px',
             `background:${theme.playerSurface}`,
             'border-radius:14px 14px 0 0',
             'cursor:move',
@@ -816,7 +802,7 @@
         titleBarDiv = titleBar;
 
         trackTitleLabel = document.createElement('div');
-        trackTitleLabel.style.cssText = `min-width:0;font-size:15px;font-weight:650;letter-spacing:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:${theme.titleText};`;
+        trackTitleLabel.style.cssText = `min-width:0;font-size:14px;font-weight:650;line-height:1.25;letter-spacing:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:${theme.titleText};`;
 
         const playbackGroup = document.createElement('div');
         playbackGroup.style.cssText = 'display:flex;justify-content:center;align-items:center;gap:6px;';
@@ -833,8 +819,8 @@
         contentDiv = document.createElement('div');
         contentDiv.style.cssText = [
             'display:grid',
-            'gap:4px',
-            'padding:0 14px 8px',
+            'gap:5px',
+            'padding:0 14px 9px',
             `background:${theme.playerSurface}`,
             'border-radius:0 0 14px 14px',
             'box-sizing:border-box'
@@ -865,14 +851,15 @@
         seekBar.min = '0';
         seekBar.max = '1000';
         seekBar.value = '0';
-        seekBar.style.cssText = 'width:100%;cursor:pointer;';
+        seekBar.style.cssText = 'width:100%;min-width:0;cursor:pointer;';
         seekBar.oninput = () => {
             if (!audio || !hasKnownDuration()) return;
             audio.currentTime = (Number(seekBar.value) / 1000) * audio.duration;
+            updateTimeDisplay();
         };
 
         const timesRow = document.createElement('div');
-        timesRow.style.cssText = `display:grid;grid-template-columns:auto minmax(0, 1fr) auto;align-items:center;font-size:13px;font-variant-numeric:tabular-nums;color:${theme.secondaryText};gap:10px;min-height:28px;`;
+        timesRow.style.cssText = `display:grid;grid-template-columns:auto minmax(8ch, 1fr) auto;align-items:center;font-size:13px;font-variant-numeric:tabular-nums;color:${theme.secondaryText};gap:10px;min-height:28px;`;
         timesRowDiv = timesRow;
 
         const timeGroup = document.createElement('div');
@@ -897,15 +884,16 @@
 
         backBtn = createIconButton('backward', 'Back 5 seconds', 36);
         backBtn.onclick = () => {
-            const currentAudio = getObservedAudio();
+            const currentAudio = getActiveAudio();
             if (!currentAudio) return;
             audio = currentAudio;
             audio.currentTime = Math.max(0, audio.currentTime - 5);
+            updateTimeDisplay();
         };
 
         playPauseBtn = createIconButton('play', 'Play', 40);
         playPauseBtn.onclick = () => {
-            const currentAudio = getObservedAudio();
+            const currentAudio = getActiveAudio();
             if (!currentAudio) {
                 return;
             }
@@ -918,19 +906,20 @@
 
             if (audio.paused) {
                 pauseOtherAudioElements(audio);
-                audio.play().catch(console.error);
+                audio.play?.().catch?.(console.error);
                 return;
             }
-            audio.pause();
+            audio.pause?.();
         };
 
         forwardBtn = createIconButton('forward', 'Forward 5 seconds', 36);
         forwardBtn.onclick = () => {
-            const currentAudio = getObservedAudio();
+            const currentAudio = getActiveAudio();
             if (!currentAudio) return;
             audio = currentAudio;
             const maxDuration = Number.isFinite(audio.duration) ? audio.duration : audio.currentTime + 5;
             audio.currentTime = Math.min(maxDuration, audio.currentTime + 5);
+            updateTimeDisplay();
         };
 
         downloadBtn = createIconButton('download', 'Download audio', 36);
@@ -991,9 +980,11 @@
             if (streamId === downloadStreamId) updateControlState();
         } catch (err) {
             if (streamId !== downloadStreamId || err?.name === 'AbortError') return;
-            console.error('[Audio Enhancer] Download capture failed', err);
+            console.error('[Audio Player for ChatGPT] Download capture failed', err);
         }
     };
+
+    const getActiveAudio = () => getObservedAudio() || audio;
 
     const captureDownloadAudio = (response) => {
         downloadStreamId += 1;
@@ -1127,31 +1118,40 @@
         }
     };
 
-    const initializeTestMode = async () => {
+    const initializePreviewMode = async () => {
         await ensureBody();
-        const testParams = new URLSearchParams(window.location.search);
-        const testDuration = Number(testParams.get('ae-duration'));
-        const testRate = Number(testParams.get('ae-rate'));
+        const previewParams = new URLSearchParams(window.location.search);
+        const previewDuration = Number(previewParams.get('ae-duration'));
+        const previewRate = Number(previewParams.get('ae-rate'));
 
-        if (Number.isFinite(testRate) && testRate > 0) {
-            playbackRate = testRate;
+        if (Number.isFinite(previewRate) && previewRate > 0) {
+            playbackRate = previewRate;
         }
 
-        if (Number.isFinite(testDuration) && testDuration > 0) {
-            const testCurrentTime = Number(testParams.get('ae-current'));
+        if (Number.isFinite(previewDuration) && previewDuration > 0) {
+            const previewCurrentTime = Number(previewParams.get('ae-current'));
             audio = {
-                currentSrc: 'test-audio',
-                currentTime: Number.isFinite(testCurrentTime)
-                    ? Math.min(testDuration, Math.max(0, testCurrentTime))
+                currentSrc: 'preview-audio',
+                currentTime: Number.isFinite(previewCurrentTime)
+                    ? Math.min(previewDuration, Math.max(0, previewCurrentTime))
                     : 0,
-                duration: testDuration,
+                duration: previewDuration,
                 ended: false,
                 paused: false,
-                playbackRate
+                playbackRate,
+                play() {
+                    this.paused = false;
+                    updateControlState();
+                    return Promise.resolve();
+                },
+                pause() {
+                    this.paused = true;
+                    updateControlState();
+                }
             };
         }
 
-        captureTrackTitleForPlayback('test-mode');
+        captureTrackTitleForPlayback('preview-mode');
         buildControls();
         updateTrackTitle();
         updateControlState();
@@ -1165,8 +1165,8 @@
 
     installThemeListener();
 
-    if (isTestMode) {
-        initializeTestMode();
+    if (isPreviewMode) {
+        initializePreviewMode();
         return;
     }
 

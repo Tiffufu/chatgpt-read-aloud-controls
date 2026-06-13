@@ -1,10 +1,36 @@
 body {
-  width: 250px;
-  height: 230px;
+  width: 260px;
+  min-height: 154px;
+  margin: 0;
   display: flex;
+  align-items: center;
   justify-content: center;
+  background: #f7f7f4;
+  color: #222222;
+  font-family: "Segoe UI", system-ui, sans-serif;
+}
+
+#container {
+  padding: 18px;
+}
+
+h1 {
+  margin: 0 0 10px;
+  font-size: 17px;
+  line-height: 1.25;
+  letter-spacing: 0;
 }
 
 p {
-  font-size: 16px;
+  margin: 0 0 10px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+p:last-child {
+  margin-bottom: 0;
+}
+
+.muted {
+  color: #666666;
 }
