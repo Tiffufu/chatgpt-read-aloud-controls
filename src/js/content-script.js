@@ -75,42 +75,52 @@
     })();
     const playerThemes = {
         light: {
-            surface: '#f4f4f1',
+            playerSurface: '#f4f4f1',
             menuSurface: '#fffefa',
-            border: 'rgba(0,0,0,0.14)',
-            shadow: '0 16px 36px rgba(0,0,0,0.18)',
-            text: '#1f1f1f',
+            playerBorder: 'rgba(0,0,0,0.14)',
+            playerShadow: '0 16px 36px rgba(0,0,0,0.18)',
+            playerText: '#1f1f1f',
             titleText: '#202020',
-            mutedText: '#5f6368',
-            accent: '#8a6d00',
-            buttonHover: 'rgba(0,0,0,0.08)',
-            dangerHover: 'rgba(220,38,38,0.11)',
-            speedButtonBg: '#fff0b8',
-            speedButtonText: '#4f4100',
-            speedButtonHover: '#f7e6a0',
+            secondaryText: '#5f6368',
+            controlHoverBackground: 'rgba(0,0,0,0.08)',
+            dangerHoverBackground: 'rgba(220,38,38,0.11)',
+            focusRing: 'rgba(0,0,0,0.16)',
+            speedPillBackground: 'rgb(243,243,243)',
+            speedPillText: '#2f2f2f',
+            speedPillHoverBackground: '#e9e9e9',
             speedMenuText: '#2f2f2f',
-            speedMenuActiveText: '#3f3400',
-            speedMenuActiveBg: '#fff2bf',
-            speedMenuHover: 'rgba(0,0,0,0.07)'
+            speedMenuActiveText: '#1f1f1f',
+            speedMenuActiveBackground: 'rgb(243,243,243)',
+            speedMenuHoverBackground: 'rgba(0,0,0,0.07)',
+            seekTrackElapsed: '#3f3f3f',
+            seekTrackRemaining: '#d9d9d9',
+            seekThumb: '#d9d9d9',
+            seekThumbBorder: '#cfcfcf',
+            seekThumbShadow: '0 1px 3px rgba(0,0,0,0.20)'
         },
         dark: {
-            surface: '#28292b',
+            playerSurface: '#28292b',
             menuSurface: 'rgba(39,40,42,0.98)',
-            border: 'rgba(255,255,255,0.16)',
-            shadow: '0 16px 36px rgba(0,0,0,0.30)',
-            text: '#f3f0e9',
+            playerBorder: 'rgba(255,255,255,0.16)',
+            playerShadow: '0 16px 36px rgba(0,0,0,0.30)',
+            playerText: '#f3f0e9',
             titleText: '#ebe7dd',
-            mutedText: '#d7dce4',
-            accent: '#fff5c7',
-            buttonHover: 'rgba(255,255,255,0.12)',
-            dangerHover: 'rgba(255,95,86,0.18)',
-            speedButtonBg: 'rgba(255,255,255,0.10)',
-            speedButtonText: '#fff5c7',
-            speedButtonHover: 'rgba(255,255,255,0.16)',
+            secondaryText: '#d7dce4',
+            controlHoverBackground: 'rgba(255,255,255,0.12)',
+            dangerHoverBackground: 'rgba(255,95,86,0.18)',
+            focusRing: 'rgba(255,255,255,0.22)',
+            speedPillBackground: 'rgba(255,255,255,0.10)',
+            speedPillText: '#f3f3f3',
+            speedPillHoverBackground: 'rgba(255,255,255,0.16)',
             speedMenuText: '#f5f3ef',
-            speedMenuActiveText: '#fff7d6',
-            speedMenuActiveBg: 'rgba(255,255,255,0.08)',
-            speedMenuHover: 'rgba(255,255,255,0.10)'
+            speedMenuActiveText: '#ffffff',
+            speedMenuActiveBackground: 'rgba(255,255,255,0.08)',
+            speedMenuHoverBackground: 'rgba(255,255,255,0.10)',
+            seekTrackElapsed: '#f3f3f3',
+            seekTrackRemaining: '#56575a',
+            seekThumb: '#f3f3f3',
+            seekThumbBorder: '#f3f3f3',
+            seekThumbShadow: '0 1px 4px rgba(0,0,0,0.36)'
         }
     };
 
@@ -158,18 +168,18 @@
     const refreshButtonHoverState = (button, hoverToken) => {
         if (!button) return;
         const theme = getPlayerTheme();
-        const token = hoverToken || button.dataset.hoverToken || 'buttonHover';
+        const token = hoverToken || button.dataset.hoverToken || 'controlHoverBackground';
         button.dataset.hoverToken = token;
         button.dataset.hoverColor = theme[token] || token;
         button.dataset.idleBackground = button.style.backgroundColor || 'transparent';
     };
 
-    const setButtonHoverState = (button, hoverToken = 'buttonHover') => {
+    const setButtonHoverState = (button, hoverToken = 'controlHoverBackground') => {
         if (!button) return;
         refreshButtonHoverState(button, hoverToken);
         button.addEventListener('mouseenter', () => {
             if (button.disabled) return;
-            button.style.backgroundColor = button.dataset.hoverColor || getPlayerTheme().buttonHover;
+            button.style.backgroundColor = button.dataset.hoverColor || getPlayerTheme().controlHoverBackground;
             button.style.transform = 'translateY(-1px)';
         });
         button.addEventListener('mouseleave', () => {
@@ -234,6 +244,85 @@
         return button;
     };
 
+    const ensurePlayerStyles = () => {
+        if (document.getElementById('ae_enhanced_player_styles')) return;
+
+        const style = document.createElement('style');
+        style.id = 'ae_enhanced_player_styles';
+        style.textContent = `
+            #ae_enhanced_player .ae_seek_bar {
+                --ae-seek-progress: 0%;
+                -webkit-appearance: none;
+                appearance: none;
+                background:
+                    linear-gradient(
+                        to right,
+                        var(--ae-seek-track-elapsed) 0%,
+                        var(--ae-seek-track-elapsed) var(--ae-seek-progress),
+                        var(--ae-seek-track-remaining) var(--ae-seek-progress),
+                        var(--ae-seek-track-remaining) 100%
+                    )
+                    center / 100% 8px no-repeat;
+                cursor: pointer;
+                direction: ltr;
+                height: 18px;
+                margin: 0;
+                border-radius: 999px;
+                width: 100%;
+            }
+
+            #ae_enhanced_player .ae_seek_bar:focus {
+                outline: none;
+            }
+
+            #ae_enhanced_player .ae_seek_bar::-webkit-slider-runnable-track {
+                background: transparent;
+                border: 0;
+                border-radius: 999px;
+                height: 8px;
+            }
+
+            #ae_enhanced_player .ae_seek_bar::-webkit-slider-thumb {
+                -webkit-appearance: none;
+                appearance: none;
+                background: var(--ae-seek-thumb);
+                border: 1px solid var(--ae-seek-thumb-border);
+                border-radius: 999px;
+                box-shadow: var(--ae-seek-thumb-shadow);
+                height: 18px;
+                margin-top: -6px;
+                width: 18px;
+            }
+
+            #ae_enhanced_player .ae_seek_bar:focus-visible::-webkit-slider-thumb {
+                box-shadow: var(--ae-seek-thumb-shadow), 0 0 0 3px var(--ae-focus-ring);
+            }
+
+            #ae_enhanced_player .ae_seek_bar::-moz-range-track {
+                background: transparent;
+                border: 0;
+                border-radius: 999px;
+                height: 8px;
+            }
+
+            #ae_enhanced_player .ae_seek_bar::-moz-range-progress {
+                background: var(--ae-seek-track-elapsed);
+                border-radius: 999px;
+                height: 8px;
+            }
+
+            #ae_enhanced_player .ae_seek_bar::-moz-range-thumb {
+                background: var(--ae-seek-thumb);
+                border: 1px solid var(--ae-seek-thumb-border);
+                border-radius: 999px;
+                box-shadow: var(--ae-seek-thumb-shadow);
+                height: 18px;
+                width: 18px;
+            }
+        `;
+        (document.head || document.documentElement).appendChild(style);
+    };
+
     const formatRate = (rate) => `${String(rate).replace(/\.0$/, '')}x`;
 
     const formatTime = (seconds) => {
@@ -247,9 +336,23 @@
         Number.isFinite(playbackRate) && playbackRate > 0 ? playbackRate : 1
     );
 
+    const getClampedAudioTime = () => {
+        if (!audio || !Number.isFinite(audio.currentTime)) return Number.NaN;
+        const currentTime = Math.max(0, audio.currentTime);
+        if (!hasKnownDuration()) return currentTime;
+        return Math.min(currentTime, audio.duration);
+    };
+
+    const getSpeedAdjustedTime = (seconds) => {
+        if (!Number.isFinite(seconds) || seconds < 0) return Number.NaN;
+        return seconds / getEffectivePlaybackRate();
+    };
+
+    const getSpeedAdjustedCurrentTime = () => getSpeedAdjustedTime(getClampedAudioTime());
+
     const getSpeedAdjustedDuration = () => {
         if (!hasKnownDuration()) return Number.NaN;
-        return audio.duration / getEffectivePlaybackRate();
+        return getSpeedAdjustedTime(audio.duration);
     };
 
     const getTrackTitle = () => {
@@ -351,18 +454,24 @@
         const themeName = getPreferredThemeName();
         const theme = getPlayerTheme();
 
-        controlsDiv.style.background = theme.surface;
-        controlsDiv.style.borderColor = theme.border;
-        controlsDiv.style.boxShadow = theme.shadow;
-        controlsDiv.style.color = theme.text;
+        controlsDiv.style.background = theme.playerSurface;
+        controlsDiv.style.borderColor = theme.playerBorder;
+        controlsDiv.style.boxShadow = theme.playerShadow;
+        controlsDiv.style.color = theme.playerText;
         controlsDiv.style.colorScheme = themeName;
+        controlsDiv.style.setProperty('--ae-focus-ring', theme.focusRing);
+        controlsDiv.style.setProperty('--ae-seek-track-elapsed', theme.seekTrackElapsed);
+        controlsDiv.style.setProperty('--ae-seek-track-remaining', theme.seekTrackRemaining);
+        controlsDiv.style.setProperty('--ae-seek-thumb', theme.seekThumb);
+        controlsDiv.style.setProperty('--ae-seek-thumb-border', theme.seekThumbBorder);
+        controlsDiv.style.setProperty('--ae-seek-thumb-shadow', theme.seekThumbShadow);
 
         if (titleBarDiv) {
-            titleBarDiv.style.background = theme.surface;
+            titleBarDiv.style.background = theme.playerSurface;
         }
 
         if (contentDiv) {
-            contentDiv.style.background = theme.surface;
+            contentDiv.style.background = theme.playerSurface;
         }
 
         if (trackTitleLabel) {
@@ -370,27 +479,23 @@
         }
 
         if (speedBtn) {
-            speedBtn.style.background = theme.speedButtonBg;
-            speedBtn.style.color = theme.speedButtonText;
-            refreshButtonHoverState(speedBtn, 'speedButtonHover');
+            speedBtn.style.background = theme.speedPillBackground;
+            speedBtn.style.color = theme.speedPillText;
+            refreshButtonHoverState(speedBtn, 'speedPillHoverBackground');
         }
 
         if (speedMenu) {
             speedMenu.style.background = theme.menuSurface;
-            speedMenu.style.borderColor = theme.border;
-            speedMenu.style.boxShadow = theme.shadow;
+            speedMenu.style.borderColor = theme.playerBorder;
+            speedMenu.style.boxShadow = theme.playerShadow;
         }
 
         if (seekStatusLabel) {
-            seekStatusLabel.style.color = theme.mutedText;
-        }
-
-        if (seekBar) {
-            seekBar.style.accentColor = theme.accent;
+            seekStatusLabel.style.color = theme.secondaryText;
         }
 
         if (timesRowDiv) {
-            timesRowDiv.style.color = theme.mutedText;
+            timesRowDiv.style.color = theme.secondaryText;
         }
 
         if (controlsDiv) {
@@ -427,16 +532,21 @@
             const isActive = Number(optionBtn.dataset.rate) === playbackRate;
             optionBtn.style.fontWeight = isActive ? '700' : '400';
             optionBtn.style.color = isActive ? theme.speedMenuActiveText : theme.speedMenuText;
-            optionBtn.style.backgroundColor = isActive ? theme.speedMenuActiveBg : 'transparent';
-            refreshButtonHoverState(optionBtn, 'speedMenuHover');
+            optionBtn.style.backgroundColor = isActive ? theme.speedMenuActiveBackground : 'transparent';
+            refreshButtonHoverState(optionBtn, 'speedMenuHoverBackground');
         });
     };
 
     const updateTimeDisplay = () => {
         const hasDuration = hasKnownDuration();
+        const clampedCurrentTime = getClampedAudioTime();
+        const currentListeningTime = getSpeedAdjustedCurrentTime();
+        const totalListeningTime = getSpeedAdjustedDuration();
+        const rateLabel = formatRate(getEffectivePlaybackRate());
 
         if (currentTimeLabel) {
-            currentTimeLabel.textContent = formatTime(audio ? audio.currentTime : 0);
+            currentTimeLabel.textContent = formatTime(currentListeningTime);
+            currentTimeLabel.title = hasDuration ? `Elapsed listening time at ${rateLabel}` : '';
             currentTimeLabel.style.display = hasDuration ? '' : 'none';
         }
 
@@ -445,8 +555,8 @@
         }
 
         if (durationLabel) {
-            durationLabel.textContent = formatTime(getSpeedAdjustedDuration());
-            durationLabel.title = hasDuration ? `Total time at ${formatRate(getEffectivePlaybackRate())}` : '';
+            durationLabel.textContent = formatTime(totalListeningTime);
+            durationLabel.title = hasDuration ? `Total listening time at ${rateLabel}` : '';
             durationLabel.style.display = hasDuration ? '' : 'none';
         }
 
@@ -458,7 +568,11 @@
             seekBar.disabled = false;
             seekBar.style.opacity = '1';
             seekBar.style.cursor = 'pointer';
-            seekBar.value = String(Math.round((audio.currentTime / audio.duration) * 1000));
+            const seekRatio = Number.isFinite(clampedCurrentTime)
+                ? Math.min(1, Math.max(0, clampedCurrentTime / audio.duration))
+                : 0;
+            seekBar.value = String(Math.round(seekRatio * 1000));
+            seekBar.style.setProperty('--ae-seek-progress', `${seekRatio * 100}%`);
             return;
         }
 
@@ -471,6 +585,7 @@
         seekBar.style.opacity = '0.45';
         seekBar.style.cursor = 'default';
         seekBar.value = '0';
+        seekBar.style.setProperty('--ae-seek-progress', '0%');
     };
 
     const updatePlayPauseLabel = () => {
@@ -631,10 +746,10 @@
             'display:none',
             'min-width:86px',
             'padding:6px',
-            `border:1px solid ${theme.border}`,
+            `border:1px solid ${theme.playerBorder}`,
             'border-radius:12px',
             `background:${theme.menuSurface}`,
-            `box-shadow:${theme.shadow}`,
+            `box-shadow:${theme.playerShadow}`,
             'z-index:2'
         ].join(';');
 
@@ -644,7 +759,7 @@
             optionBtn.dataset.rate = String(rate);
             optionBtn.textContent = formatRate(rate);
             optionBtn.style.cssText = `${nakedButtonStyle};display:block;width:100%;height:30px;padding:0 10px;border-radius:8px;text-align:left;font-size:13px;`;
-            setButtonHoverState(optionBtn, 'speedMenuHover');
+            setButtonHoverState(optionBtn, 'speedMenuHoverBackground');
             optionBtn.onclick = (event) => {
                 event.stopPropagation();
                 applyPlaybackRate(rate);
@@ -660,6 +775,7 @@
 
         const themeName = getPreferredThemeName();
         const theme = getPlayerTheme();
+        ensurePlayerStyles();
 
         controlsDiv = document.createElement('div');
         controlsDiv.id = 'ae_enhanced_player';
@@ -672,12 +788,12 @@
             'width:min(560px, calc(100vw - 20px))',
             'border-radius:14px',
             'overflow:visible',
-            `border:1px solid ${theme.border}`,
-            `box-shadow:${theme.shadow}`,
-            `color:${theme.text}`,
+            `border:1px solid ${theme.playerBorder}`,
+            `box-shadow:${theme.playerShadow}`,
+            `color:${theme.playerText}`,
             'font-family:"Segoe UI", sans-serif',
             'font-size:14px',
-            `background:${theme.surface}`,
+            `background:${theme.playerSurface}`,
             `color-scheme:${themeName}`,
             'box-sizing:border-box'
         ].join(';');
@@ -690,7 +806,7 @@
             'gap:10px',
             'min-height:52px',
             'padding:7px 10px 7px 14px',
-            `background:${theme.surface}`,
+            `background:${theme.playerSurface}`,
             'border-radius:14px 14px 0 0',
             'cursor:move',
             'user-select:none',
@@ -711,7 +827,7 @@
         minimizeBtn = createIconButton('collapse', 'Hide timeline', 36);
         minimizeBtn.onclick = toggleCollapsed;
 
-        const closeBtn = createIconButton('close', 'Close player', 36, 'dangerHover');
+        const closeBtn = createIconButton('close', 'Close player', 36, 'dangerHoverBackground');
         closeBtn.onclick = closePlayer;
 
         contentDiv = document.createElement('div');
@@ -719,7 +835,7 @@
             'display:grid',
             'gap:4px',
             'padding:0 14px 8px',
-            `background:${theme.surface}`,
+            `background:${theme.playerSurface}`,
             'border-radius:0 0 14px 14px',
             'box-sizing:border-box'
         ].join(';');
@@ -727,8 +843,8 @@
         speedBtn = document.createElement('button');
         speedBtn.type = 'button';
         speedBtn.title = 'Playback speed';
-        speedBtn.style.cssText = `${nakedButtonStyle};height:28px;min-width:58px;padding:0 10px;border-radius:999px;background:${theme.speedButtonBg};font-size:13px;font-weight:650;color:${theme.speedButtonText};text-align:center;`;
-        setButtonHoverState(speedBtn, 'speedButtonHover');
+        speedBtn.style.cssText = `${nakedButtonStyle};height:28px;min-width:58px;padding:0 10px;border-radius:999px;background:${theme.speedPillBackground};font-size:13px;font-weight:650;color:${theme.speedPillText};text-align:center;`;
+        setButtonHoverState(speedBtn, 'speedPillHoverBackground');
         speedBtn.onclick = (event) => {
             event.stopPropagation();
             if (!speedMenu) return;
@@ -740,22 +856,23 @@
         leftTimesContainer.append(speedBtn, createSpeedMenu());
 
         seekStatusLabel = document.createElement('div');
-        seekStatusLabel.style.cssText = `display:none;text-align:center;font-size:13px;color:${theme.mutedText};white-space:nowrap;`;
+        seekStatusLabel.style.cssText = `display:none;text-align:center;font-size:13px;color:${theme.secondaryText};white-space:nowrap;`;
         seekStatusLabel.textContent = 'Loading seekbar...';
 
         seekBar = document.createElement('input');
+        seekBar.className = 'ae_seek_bar';
         seekBar.type = 'range';
         seekBar.min = '0';
         seekBar.max = '1000';
         seekBar.value = '0';
-        seekBar.style.cssText = `width:100%;height:12px;margin:0;accent-color:${theme.accent};cursor:pointer;`;
+        seekBar.style.cssText = 'width:100%;cursor:pointer;';
         seekBar.oninput = () => {
             if (!audio || !hasKnownDuration()) return;
             audio.currentTime = (Number(seekBar.value) / 1000) * audio.duration;
         };
 
         const timesRow = document.createElement('div');
-        timesRow.style.cssText = `display:grid;grid-template-columns:auto minmax(0, 1fr) auto;align-items:center;font-size:13px;font-variant-numeric:tabular-nums;color:${theme.mutedText};gap:10px;min-height:28px;`;
+        timesRow.style.cssText = `display:grid;grid-template-columns:auto minmax(0, 1fr) auto;align-items:center;font-size:13px;font-variant-numeric:tabular-nums;color:${theme.secondaryText};gap:10px;min-height:28px;`;
         timesRowDiv = timesRow;
 
         const timeGroup = document.createElement('div');
@@ -1012,6 +1129,28 @@
 
     const initializeTestMode = async () => {
         await ensureBody();
+        const testParams = new URLSearchParams(window.location.search);
+        const testDuration = Number(testParams.get('ae-duration'));
+        const testRate = Number(testParams.get('ae-rate'));
+
+        if (Number.isFinite(testRate) && testRate > 0) {
+            playbackRate = testRate;
+        }
+
+        if (Number.isFinite(testDuration) && testDuration > 0) {
+            const testCurrentTime = Number(testParams.get('ae-current'));
+            audio = {
+                currentSrc: 'test-audio',
+                currentTime: Number.isFinite(testCurrentTime)
+                    ? Math.min(testDuration, Math.max(0, testCurrentTime))
+                    : 0,
+                duration: testDuration,
+                ended: false,
+                paused: false,
+                playbackRate
+            };
+        }
+
         captureTrackTitleForPlayback('test-mode');
         buildControls();
         updateTrackTitle();
