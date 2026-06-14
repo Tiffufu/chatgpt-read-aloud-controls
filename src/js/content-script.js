@@ -33,8 +33,46 @@
     let playbackRate = Number(localStorage.getItem('ae_playbackRate') || 1);
     if (!Number.isFinite(playbackRate) || playbackRate <= 0) playbackRate = 1;
 
+    const fallbackPlayerSettingsApi = (() => {
+        const MIN_SKIP_SECONDS = 1;
+        const MAX_SKIP_SECONDS = 300;
+        const DEFAULT_SETTINGS = Object.freeze({
+            skipBackSeconds: 5,
+            skipForwardSeconds: 5,
+            theme: 'system'
+        });
+        const clampSkipSeconds = (value, fallback) => {
+            const numberValue = Number(value);
+            if (!Number.isFinite(numberValue)) return fallback;
+            return Math.min(MAX_SKIP_SECONDS, Math.max(MIN_SKIP_SECONDS, Math.round(numberValue)));
+        };
+        const normalizeTheme = (value) => (
+            value === 'light' || value === 'dark' ? value : DEFAULT_SETTINGS.theme
+        );
+        return Object.freeze({
+            DEFAULT_SETTINGS,
+            normalizeSettings: (settings = {}) => ({
+                skipBackSeconds: clampSkipSeconds(
+                    settings.skipBackSeconds ?? settings.backJumpSeconds,
+                    DEFAULT_SETTINGS.skipBackSeconds
+                ),
+                skipForwardSeconds: clampSkipSeconds(
+                    settings.skipForwardSeconds ?? settings.forwardJumpSeconds,
+                    DEFAULT_SETTINGS.skipForwardSeconds
+                ),
+                theme: normalizeTheme(settings.theme)
+            })
+        });
+    })();
+
+    const playerSettingsApi = window.AEPlayerSettings || fallbackPlayerSettingsApi;
+    const { DEFAULT_SETTINGS: DEFAULT_PLAYER_SETTINGS, normalizeSettings } = playerSettingsApi;
+
+    let playerSettings = { ...DEFAULT_PLAYER_SETTINGS };
+
     let currentMimeType = 'audio/aac';
     let allChunks = [];
+    let isDownloadCaptureComplete = false;
     let isCollapsed = false;
     let dismissedPlaybackKey = null;
     let downloadStreamId = 0;
@@ -46,6 +84,9 @@
     const PREVIEW_PATH_PATTERN = /(?:^|\/)preview\.html(?:[?#]|$)/i;
     const speedOptions = [0.75, 1, 1.25, 1.5, 2];
     const isPreviewMode = PREVIEW_PATH_PATTERN.test(window.location.href);
+
+    const normalizePlayerSettings = normalizeSettings;
+
     const previewThemeOverride = (() => {
         if (!isPreviewMode) return '';
         try {
@@ -108,6 +149,7 @@
 
     const getPreferredThemeName = () => {
         if (previewThemeOverride) return previewThemeOverride;
+        if (playerSettings.theme === 'light' || playerSettings.theme === 'dark') return playerSettings.theme;
         if (typeof window.matchMedia !== 'function') return 'dark';
         return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
     };
@@ -416,6 +458,24 @@
         button.style.cursor = enabled ? 'pointer' : 'default';
     };
 
+    const updateJumpButtonLabels = () => {
+        refreshIconButton(backBtn, 'backward', `Skip back ${playerSettings.skipBackSeconds} seconds`);
+        refreshIconButton(forwardBtn, 'forward', `Skip forward ${playerSettings.skipForwardSeconds} seconds`);
+    };
+
+    const applyPlayerSettings = (settings = {}) => {
+        playerSettings = normalizePlayerSettings({ ...playerSettings, ...settings });
+        updateJumpButtonLabels();
+        applyTheme();
+    };
+
+    const requestPlayerSettings = () => {
+        window.postMessage({
+            source: 'ae-read-aloud-player',
+            type: 'AE_PLAYER_SETTINGS_REQUEST'
+        }, '*');
+    };
+
     const closeSpeedMenu = () => {
         if (!speedMenu) return;
         speedMenu.style.display = 'none';
@@ -586,9 +646,11 @@
 
     const updateControlState = () => {
         const canControlPlayback = hasAudioSource();
-        const canDownload = allChunks.length > 0;
+        const canDownload = isDownloadCaptureComplete && allChunks.length > 0;
+        const downloadLabel = canDownload ? 'Download audio' : 'Audio is still loading';
 
         setButtonEnabled(downloadBtn, canDownload);
+        refreshIconButton(downloadBtn, 'download', downloadLabel);
         setButtonEnabled(playPauseBtn, canControlPlayback);
         setButtonEnabled(backBtn, canControlPlayback);
         setButtonEnabled(forwardBtn, canControlPlayback);
@@ -609,7 +671,7 @@
     };
 
     const downloadAudio = () => {
-        if (!allChunks.length) return;
+        if (!isDownloadCaptureComplete || !allChunks.length) return;
         const blob = new Blob(allChunks, { type: currentMimeType });
         const url = URL.createObjectURL(blob);
         const extension = currentMimeType.includes('mpeg')
@@ -666,12 +728,14 @@
 
     const closePlayer = () => {
         const currentAudio = getObservedAudio() || audio;
-        dismissedPlaybackKey = currentAudio && !currentAudio.paused ? getPlaybackKey(currentAudio) : null;
+        const playbackKey = getPlaybackKey(currentAudio);
+        dismissedPlaybackKey = playbackKey || (currentAudio && !currentAudio.paused ? playbackKey : null);
 
         if (currentAudio && !currentAudio.paused && !currentAudio.ended) {
             currentAudio.pause();
         }
         pauseOtherAudioElements(currentAudio);
+
         teardownControls();
     };
 
@@ -908,12 +972,12 @@ const beginDrag = (event) => {
         const rightGroup = document.createElement('div');
         rightGroup.style.cssText = 'display:flex;justify-content:flex-end;align-items:center;';
 
-        backBtn = createIconButton('backward', 'Back 5 seconds', 36);
+        backBtn = createIconButton('backward', `Skip back ${playerSettings.skipBackSeconds} seconds`, 36);
         backBtn.onclick = () => {
             const currentAudio = getActiveAudio();
             if (!currentAudio) return;
             audio = currentAudio;
-            audio.currentTime = Math.max(0, audio.currentTime - 5);
+            audio.currentTime = Math.max(0, audio.currentTime - playerSettings.skipBackSeconds);
             updateTimeDisplay();
         };
 
@@ -938,13 +1002,13 @@ const beginDrag = (event) => {
             audio.pause?.();
         };
 
-        forwardBtn = createIconButton('forward', 'Forward 5 seconds', 36);
+        forwardBtn = createIconButton('forward', `Skip forward ${playerSettings.skipForwardSeconds} seconds`, 36);
         forwardBtn.onclick = () => {
             const currentAudio = getActiveAudio();
             if (!currentAudio) return;
             audio = currentAudio;
-            const maxDuration = Number.isFinite(audio.duration) ? audio.duration : audio.currentTime + 5;
-            audio.currentTime = Math.min(maxDuration, audio.currentTime + 5);
+            const maxDuration = Number.isFinite(audio.duration) ? audio.duration : audio.currentTime + playerSettings.skipForwardSeconds;
+            audio.currentTime = Math.min(maxDuration, audio.currentTime + playerSettings.skipForwardSeconds);
             updateTimeDisplay();
         };
 
@@ -961,6 +1025,7 @@ const beginDrag = (event) => {
         document.body.appendChild(controlsDiv);
 
         updateTrackTitle();
+        updateJumpButtonLabels();
         applyTheme();
         updateSpeedUi();
         updateControlState();
@@ -989,23 +1054,34 @@ const beginDrag = (event) => {
     };
 
     const collectDownloadStream = async (response, streamId) => {
+        let captureCompleted = false;
+
         try {
             if (response.body) {
                 const reader = response.body.getReader();
                 while (streamId === downloadStreamId) {
                     const { done, value } = await reader.read();
-                    if (done) break;
-                    allChunks.push(value);
+                    if (done) {
+                        captureCompleted = true;
+                        break;
+                    }
+                    if (value) allChunks.push(value);
                 }
             } else {
                 const buffer = await response.arrayBuffer();
                 if (streamId !== downloadStreamId) return;
                 allChunks.push(new Uint8Array(buffer));
+                captureCompleted = true;
             }
 
-            if (streamId === downloadStreamId) updateControlState();
+            if (streamId === downloadStreamId) {
+                isDownloadCaptureComplete = captureCompleted && allChunks.length > 0;
+                updateControlState();
+            }
         } catch (err) {
             if (streamId !== downloadStreamId || err?.name === 'AbortError') return;
+            isDownloadCaptureComplete = false;
+            updateControlState();
             console.error('[Audio Player for ChatGPT] Download capture failed', err);
         }
     };
@@ -1017,6 +1093,7 @@ const beginDrag = (event) => {
         const streamId = downloadStreamId;
         currentMimeType = response.headers.get('content-type')?.split(';')[0] || 'audio/aac';
         allChunks = [];
+        isDownloadCaptureComplete = false;
         updateControlState();
         collectDownloadStream(response, streamId);
     };
@@ -1150,6 +1227,11 @@ const beginDrag = (event) => {
         const previewDuration = Number(previewParams.get('ae-duration'));
         const previewRate = Number(previewParams.get('ae-rate'));
 
+        applyPlayerSettings({
+            skipBackSeconds: previewParams.get('ae-back') || playerSettings.skipBackSeconds,
+            skipForwardSeconds: previewParams.get('ae-forward') || playerSettings.skipForwardSeconds
+        });
+
         if (Number.isFinite(previewRate) && previewRate > 0) {
             playbackRate = previewRate;
         }
@@ -1183,6 +1265,13 @@ const beginDrag = (event) => {
         updateControlState();
     };
 
+    window.addEventListener('message', (event) => {
+        if (event.source !== window) return;
+        const data = event.data || {};
+        if (data.source !== 'ae-read-aloud-extension' || data.type !== 'AE_PLAYER_SETTINGS') return;
+        applyPlayerSettings(data.settings);
+    });
+
     document.addEventListener('click', (event) => {
         if (!speedMenu || !speedBtn) return;
         if (speedMenu.contains(event.target) || speedBtn.contains(event.target)) return;
@@ -1190,6 +1279,7 @@ const beginDrag = (event) => {
     });
 
     installThemeListener();
+    requestPlayerSettings();
 
     if (isPreviewMode) {
         initializePreviewMode();

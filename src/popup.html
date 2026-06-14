@@ -5,10 +5,34 @@
     <link rel="stylesheet" type="text/css" href="css/popup.css" />
   </head>
   <body>
-    <div id="container">
-      <h1>Read Aloud Player</h1>
-      <p>Open ChatGPT, start Read Aloud, and the player appears automatically.</p>
-      <p class="muted">Reload the ChatGPT tab after installing or updating the extension.</p>
-    </div>
+    <form id="settingsForm">
+      <header>
+        <h1>Read Aloud Player</h1>
+        <p>Player settings</p>
+      </header>
+
+      <label class="field" for="skipBackSeconds">
+        <span>Skip back seconds</span>
+        <input id="skipBackSeconds" name="skipBackSeconds" type="number" min="1" max="300" step="1" inputmode="numeric" autocomplete="off" />
+      </label>
+
+      <label class="field" for="skipForwardSeconds">
+        <span>Skip forward seconds</span>
+        <input id="skipForwardSeconds" name="skipForwardSeconds" type="number" min="1" max="300" step="1" inputmode="numeric" autocomplete="off" />
+      </label>
+
+      <label class="field" for="theme">
+        <span>Theme</span>
+        <select id="theme" name="theme">
+          <option value="system">Follow system</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+      </label>
+
+      <p id="status" class="muted" aria-live="polite"></p>
+    </form>
+    <script src="js/player-settings.js"></script>
+    <script src="js/popup.js"></script>
   </body>
 </html>

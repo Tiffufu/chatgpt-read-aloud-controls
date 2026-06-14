@@ -1,36 +1,97 @@
+:root {
+  color-scheme: light dark;
+}
+
 body {
-  width: 260px;
-  min-height: 154px;
+  width: 300px;
   margin: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   background: #f7f7f4;
   color: #222222;
   font-family: "Segoe UI", system-ui, sans-serif;
 }
 
-#container {
-  padding: 18px;
+#settingsForm {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+}
+
+header {
+  display: grid;
+  gap: 3px;
 }
 
 h1 {
-  margin: 0 0 10px;
+  margin: 0;
   font-size: 17px;
   line-height: 1.25;
   letter-spacing: 0;
 }
 
 p {
-  margin: 0 0 10px;
-  font-size: 13px;
-  line-height: 1.45;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
-p:last-child {
-  margin-bottom: 0;
+.field {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+input,
+select {
+  width: 100%;
+  min-height: 34px;
+  box-sizing: border-box;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  border-radius: 9px;
+  background: #fffefa;
+  color: #222222;
+  font: inherit;
+  font-size: 13px;
+}
+
+input {
+  padding: 0 10px;
+}
+
+select {
+  padding: 0 30px 0 10px;
+}
+
+input:focus,
+select:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.12);
 }
 
 .muted {
   color: #666666;
+  min-height: 17px;
+}
+
+@media (prefers-color-scheme: dark) {
+  body {
+    background: #28292b;
+    color: #f3f0e9;
+  }
+
+  input,
+  select {
+    border-color: rgba(255, 255, 255, 0.18);
+    background: rgba(255, 255, 255, 0.08);
+    color: #f3f0e9;
+  }
+
+  input:focus,
+  select:focus {
+    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.18);
+  }
+
+  .muted {
+    color: #d7dce4;
+  }
 }
