@@ -1,5 +1,5 @@
 /**
- * Floating player for ChatGPT Read Aloud.
+ * Read Aloud Controls for ChatGPT.
  *
  * This extension is not affiliated with OpenAI.
  * See CREDITS.md for original project and third-party attributions.
@@ -70,12 +70,27 @@
 
     let playerSettings = { ...DEFAULT_PLAYER_SETTINGS };
 
-    let currentMimeType = 'audio/aac';
-    let allChunks = [];
-    let isDownloadCaptureComplete = false;
+    const CAPTURE_STATE = Object.freeze({
+        IDLE: 'idle',
+        LOADING: 'loading',
+        READY: 'ready',
+        FAILED: 'failed'
+    });
+
+    const createPlayerSession = (id = 0) => ({
+        id,
+        audioElement: null,
+        playbackKey: '',
+        captureState: CAPTURE_STATE.IDLE,
+        chunks: [],
+        mimeType: 'audio/aac',
+        startedAt: 0,
+        completedAt: 0
+    });
+
+    let playerSession = createPlayerSession();
     let isCollapsed = false;
     let dismissedPlaybackKey = null;
-    let downloadStreamId = 0;
     let trackTitleAtPlaybackStart = 'Read aloud';
     let trackTitlePlaybackKey = '';
     const observedAudioElements = new Set();
@@ -84,9 +99,39 @@
     const PREVIEW_PATH_PATTERN = /(?:^|\/)preview\.html(?:[?#]|$)/i;
     const speedOptions = [0.75, 1, 1.25, 1.5, 2];
     const isPreviewMode = PREVIEW_PATH_PATTERN.test(window.location.href);
-    const MAX_OBSERVED_AUDIO_ELEMENTS = 30;
-
     const normalizePlayerSettings = normalizeSettings;
+
+    const debugLog = (...args) => {
+        try {
+            if (localStorage.getItem('ae_debug') === '1') {
+                console.debug('[AE Player]', ...args);
+            }
+        } catch (_err) {
+            // Debug logging must never affect the player runtime.
+        }
+    };
+
+    const isCurrentSession = (sessionId) => playerSession.id === sessionId;
+    const isDownloadReady = () => (
+        playerSession.captureState === CAPTURE_STATE.READY && playerSession.chunks.length > 0
+    );
+    const getDownloadLabel = () => {
+        if (isDownloadReady()) return 'Download audio';
+        if (playerSession.captureState === CAPTURE_STATE.FAILED) return 'Audio download unavailable';
+        return 'Audio is still loading';
+    };
+
+    const setCaptureState = (captureState, completedAt = 0) => {
+        playerSession.captureState = captureState;
+        playerSession.completedAt = completedAt || playerSession.completedAt;
+        debugLog('capture state', {
+            sessionId: playerSession.id,
+            captureState: playerSession.captureState,
+            chunks: playerSession.chunks.length,
+            mimeType: playerSession.mimeType
+        });
+        updateControlState();
+    };
 
     const previewThemeOverride = (() => {
         if (!isPreviewMode) return '';
@@ -408,37 +453,10 @@
         return element;
     };
 
-    const pruneObservedAudioElements = (activeElement = audio) => {
-        observedAudioElements.forEach((element) => {
-            if (!isAudioElement(element)) {
-                observedAudioElements.delete(element);
-                return;
-            }
-
-            const isInactiveDetachedElement = element !== activeElement
-                && !element.isConnected
-                && (element.paused || element.ended || !hasElementSource(element));
-
-            if (isInactiveDetachedElement) observedAudioElements.delete(element);
-        });
-
-        if (observedAudioElements.size <= MAX_OBSERVED_AUDIO_ELEMENTS) return;
-
-        Array.from(observedAudioElements).some((element) => {
-            if (observedAudioElements.size <= MAX_OBSERVED_AUDIO_ELEMENTS) return true;
-            if (element === activeElement || (!element.paused && !element.ended)) return false;
-            observedAudioElements.delete(element);
-            return false;
-        });
-    };
-
-    const getKnownAudioElements = () => {
-        pruneObservedAudioElements();
-        return Array.from(new Set([
-            ...observedAudioElements,
-            ...document.querySelectorAll('audio')
-        ])).filter(isAudioElement);
-    };
+    const getKnownAudioElements = () => Array.from(new Set([
+        ...observedAudioElements,
+        ...document.querySelectorAll('audio')
+    ])).filter(isAudioElement);
 
     const pauseOtherAudioElements = (activeElement) => {
         getKnownAudioElements().forEach((element) => {
@@ -503,18 +521,6 @@
 
     const SETTINGS_EVENT = 'ae-read-aloud-player:settings';
     const SETTINGS_REQUEST_EVENT = 'ae-read-aloud-player:settings-request';
-
-    const readSettingsEventDetail = (detail) => {
-        if (typeof detail === 'string') {
-            try {
-                return JSON.parse(detail);
-            } catch (_err) {
-                return {};
-            }
-        }
-
-        return detail && typeof detail === 'object' ? detail : {};
-    };
 
     const requestPlayerSettings = () => {
         document.dispatchEvent(new CustomEvent(SETTINGS_REQUEST_EVENT));
@@ -712,13 +718,18 @@
         );
     };
 
-    const updateControlState = () => {
-        const canControlPlayback = hasAudioSource();
-        const canDownload = isDownloadCaptureComplete && allChunks.length > 0;
-        const downloadLabel = canDownload ? 'Download audio' : 'Audio is still loading';
-
+    const updateDownloadButtonState = () => {
+        if (!downloadBtn) return;
+        const canDownload = isDownloadReady();
+        const downloadLabel = getDownloadLabel();
         setButtonEnabled(downloadBtn, canDownload);
         refreshIconButton(downloadBtn, 'download', downloadLabel);
+    };
+
+    const updateControlState = () => {
+        const canControlPlayback = hasAudioSource();
+
+        updateDownloadButtonState();
         setButtonEnabled(playPauseBtn, canControlPlayback);
         setButtonEnabled(backBtn, canControlPlayback);
         setButtonEnabled(forwardBtn, canControlPlayback);
@@ -739,19 +750,20 @@
     };
 
     const downloadAudio = () => {
-        if (!isDownloadCaptureComplete || !allChunks.length) return;
-        const blob = new Blob(allChunks, { type: currentMimeType });
+        if (!isDownloadReady()) return;
+        const { chunks, mimeType } = playerSession;
+        const blob = new Blob(chunks, { type: mimeType });
         const url = URL.createObjectURL(blob);
-        const extension = currentMimeType.includes('mpeg')
+        const extension = mimeType.includes('mpeg')
             ? 'mp3'
-            : currentMimeType.includes('wav')
+            : mimeType.includes('wav')
                 ? 'wav'
-                : currentMimeType.includes('aac')
+                : mimeType.includes('aac')
                     ? 'aac'
                     : 'bin';
         const a = Object.assign(document.createElement('a'), {
             href: url,
-            download: `ChatGPT_Audio_${Date.now()}.${extension}`,
+            download: `ChatGPT_Read_Aloud_${Date.now()}.${extension}`,
             style: 'display:none'
         });
         document.body.appendChild(a);
@@ -1122,49 +1134,62 @@
         syncPlayerUi();
     };
 
-    const collectDownloadStream = async (response, streamId) => {
+    const collectDownloadStream = async (response, sessionId) => {
         let captureCompleted = false;
 
         try {
             if (response.body) {
                 const reader = response.body.getReader();
-                while (streamId === downloadStreamId) {
+                while (isCurrentSession(sessionId)) {
                     const { done, value } = await reader.read();
                     if (done) {
                         captureCompleted = true;
                         break;
                     }
-                    if (value) allChunks.push(value);
+                    if (value) playerSession.chunks.push(value);
                 }
             } else {
                 const buffer = await response.arrayBuffer();
-                if (streamId !== downloadStreamId) return;
-                allChunks.push(new Uint8Array(buffer));
+                if (!isCurrentSession(sessionId)) return;
+                playerSession.chunks.push(new Uint8Array(buffer));
                 captureCompleted = true;
             }
 
-            if (streamId === downloadStreamId) {
-                isDownloadCaptureComplete = captureCompleted && allChunks.length > 0;
-                updateControlState();
-            }
+            if (!isCurrentSession(sessionId)) return;
+
+            setCaptureState(
+                captureCompleted && playerSession.chunks.length > 0
+                    ? CAPTURE_STATE.READY
+                    : CAPTURE_STATE.FAILED,
+                Date.now()
+            );
         } catch (err) {
-            if (streamId !== downloadStreamId || err?.name === 'AbortError') return;
-            isDownloadCaptureComplete = false;
-            updateControlState();
-            console.error('[Audio Player for ChatGPT] Download capture failed', err);
+            if (!isCurrentSession(sessionId) || err?.name === 'AbortError') return;
+            setCaptureState(CAPTURE_STATE.FAILED, Date.now());
+            console.error('[Read Aloud Controls for ChatGPT] Download capture failed', err);
         }
     };
 
     const getActiveAudio = () => getObservedAudio() || audio;
 
     const captureDownloadAudio = (response) => {
-        downloadStreamId += 1;
-        const streamId = downloadStreamId;
-        currentMimeType = response.headers.get('content-type')?.split(';')[0] || 'audio/aac';
-        allChunks = [];
-        isDownloadCaptureComplete = false;
+        const activeAudio = getActiveAudio();
+        const sessionId = playerSession.id + 1;
+        playerSession = {
+            ...createPlayerSession(sessionId),
+            audioElement: activeAudio,
+            playbackKey: getPlaybackKey(activeAudio),
+            captureState: CAPTURE_STATE.LOADING,
+            mimeType: response.headers.get('content-type')?.split(';')[0] || 'audio/aac',
+            startedAt: Date.now()
+        };
+        debugLog('capture started', {
+            sessionId: playerSession.id,
+            playbackKey: playerSession.playbackKey,
+            mimeType: playerSession.mimeType
+        });
         updateControlState();
-        collectDownloadStream(response, streamId);
+        collectDownloadStream(response, sessionId);
     };
 
     const getFetchUrl = (input) => {
@@ -1328,6 +1353,26 @@
             };
         }
 
+        const previewDownloadState = previewParams.get('ae-download');
+        if (['loading', 'ready', 'failed'].includes(previewDownloadState)) {
+            playerSession = {
+                ...createPlayerSession(playerSession.id + 1),
+                audioElement: audio,
+                playbackKey: 'preview-mode',
+                captureState: previewDownloadState === 'ready'
+                    ? CAPTURE_STATE.READY
+                    : previewDownloadState === 'failed'
+                        ? CAPTURE_STATE.FAILED
+                        : CAPTURE_STATE.LOADING,
+                chunks: previewDownloadState === 'ready'
+                    ? [new TextEncoder().encode('Preview audio placeholder')]
+                    : [],
+                mimeType: 'audio/aac',
+                startedAt: Date.now(),
+                completedAt: previewDownloadState === 'ready' || previewDownloadState === 'failed' ? Date.now() : 0
+            };
+        }
+
         captureTrackTitleForPlayback('preview-mode');
         buildControls();
         updateTrackTitle();
@@ -1335,7 +1380,7 @@
     };
 
     document.addEventListener(SETTINGS_EVENT, (event) => {
-        applyPlayerSettings(readSettingsEventDetail(event.detail).settings);
+        applyPlayerSettings(event.detail?.settings);
     });
 
     document.addEventListener('click', (event) => {

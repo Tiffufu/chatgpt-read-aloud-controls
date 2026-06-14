@@ -1,30 +1,31 @@
 # Codebase Guide
 
-This project intentionally stays small: a Manifest V3 extension with a shared settings schema, two content-script entry points, and a settings popup. There is no bundler, package manager, or generated output.
+Read Aloud Controls for ChatGPT is a Manifest V3 extension with a popup settings UI, an isolated settings bridge, and a main-world player script. There is no bundler, package manager, or generated output.
 
-## Runtime Pieces
+## Runtime pieces
 
 ### `manifest.json`
 
-Registers the extension metadata, popup, icons, shared settings schema, an isolated settings bridge, and the ChatGPT player script. The player script runs at `document_start` in the page's main world so it can observe page-created audio elements and wrap `window.fetch`; the bridge runs in the default isolated world so it can access extension APIs.
+Registers extension metadata, popup, icons, shared settings schema, the isolated settings bridge, and the ChatGPT player script. The player script runs at `document_start` in the page's main world so it can observe page-created audio elements and wrap `window.fetch`. The bridge runs in the default isolated world so it can access extension APIs.
 
 ### `src/js/player-settings.js`
 
-Defines the storage key, setting defaults, accepted values, and normalization logic. It is deliberately dependency-free because it loads in the popup, the isolated content-script world, and the page main world.
+Defines the storage key, setting defaults, accepted values, and normalization logic. It is dependency-free because it loads in the popup, the isolated content-script world, and the page main world.
 
 ### `src/js/settings-bridge.js`
 
-Reads `chrome.storage.local`, listens for popup updates, and forwards normalized settings into the page through scoped DOM `CustomEvent`s. Event payloads are JSON strings so the isolated extension world and page/main world do not share live objects. This avoids polluting ChatGPT's global `window.postMessage` channel while keeping extension APIs out of the main-world player script and preserving the player's ability to patch page-created audio and fetch behavior.
+Reads `chrome.storage.local`, listens for popup updates, and forwards normalized settings into the page through scoped DOM `CustomEvent`s. This avoids polluting ChatGPT's global `window.postMessage` channel while keeping extension APIs out of the main-world player script.
 
 ### `src/js/content-script.js`
 
-Owns all player behavior:
+Owns the injected player runtime:
 
 - Tracks audio elements created by ChatGPT.
-- Prunes inactive detached audio references so long single-page sessions do not keep stale nodes indefinitely.
 - Scores known audio elements to identify the active Read Aloud stream.
-- Pauses competing audio elements when a new one starts.
-- Captures Read Aloud responses from `fetch()` clones for downloads and enables download only after capture completes.
+- Pauses competing audio elements when playback starts.
+- Captures Read Aloud responses from `fetch()` clones.
+- Stores active capture/download state in `playerSession`.
+- Enables audio download only after capture completes.
 - Builds the floating player UI directly in the page.
 - Applies popup-controlled skip intervals and theme choice.
 - Keeps timeline, speed, and play/pause state synchronized while the tab is visible.
@@ -33,17 +34,19 @@ Important helpers:
 
 - `getObservedAudio()` chooses the best active audio element.
 - `isSpeechResponse()` decides whether a fetch response should be captured for download.
+- `playerSession` owns active capture state, MIME type, chunks, and playback key.
+- `updateDownloadButtonState()` derives the download affordance from the current session.
 - `buildControls()` constructs the floating player UI.
-- `updateControlState()` refreshes enabled/disabled state, including download readiness, speed labels, play/pause icon, and time labels.
+- `updateControlState()` refreshes enabled/disabled state, speed labels, play/pause icon, and time labels.
 - `initializePreviewMode()` renders the same UI in `preview.html` without a ChatGPT stream.
 
 ### `src/popup.html`, `src/css/popup.css`, and `src/js/popup.js`
 
-The popup owns persistent settings for skip intervals and theme. It writes settings to `chrome.storage.local`; the isolated settings bridge observes storage changes and forwards normalized settings into active ChatGPT tabs with extension-scoped DOM events. The player still appears automatically when ChatGPT starts Read Aloud.
+The popup owns persistent settings for skip intervals and theme. It writes settings to `chrome.storage.local`; the isolated settings bridge observes storage changes and forwards normalized settings into active ChatGPT tabs with extension-scoped DOM events.
 
 ### `preview.html`
 
-Local UI harness for maintainers. It loads the production content script and passes preview state through query params:
+Local UI harness for maintainers. It loads the production content script and passes preview state through query parameters:
 
 - `ae-theme=light|dark`
 - `ae-duration=<seconds>`
@@ -51,8 +54,9 @@ Local UI harness for maintainers. It loads the production content script and pas
 - `ae-rate=<number>`
 - `ae-back=<seconds>`
 - `ae-forward=<seconds>`
+- `ae-download=loading|ready|failed`
 
-## Common Changes
+## Common changes
 
 ### Add a playback speed
 
@@ -72,4 +76,8 @@ Update `ensurePlayerStyles()` for browser range-input track and thumb styling. K
 
 ### Update audio endpoint detection
 
-Update both `isSpeechResponse()` and the endpoint scoring inside `getObservedAudio()`. The first controls download capture; the second helps choose the active audio element.
+Update both `isSpeechResponse()` and endpoint scoring inside `getObservedAudio()`. The first controls download capture; the second helps choose the active audio element.
+
+## Verification
+
+Before shipping runtime changes, run the checklist in `docs/ARCHITECTURE.md`.

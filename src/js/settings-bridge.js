@@ -38,13 +38,11 @@
     const SETTINGS_REQUEST_EVENT = 'ae-read-aloud-player:settings-request';
 
     const postSettings = (settings, reason = 'snapshot') => {
-        const payload = JSON.stringify({
-            reason,
-            settings: normalizeSettings(settings)
-        });
-
         document.dispatchEvent(new CustomEvent(SETTINGS_EVENT, {
-            detail: payload
+            detail: {
+                reason,
+                settings: normalizeSettings(settings)
+            }
         }));
     };
 
@@ -58,7 +56,7 @@
         try {
             postSettings(await readStoredSettings(), reason);
         } catch (err) {
-            console.error('[Audio Player for ChatGPT] Failed to read settings', err);
+            console.error('[Read Aloud Controls for ChatGPT] Failed to read settings', err);
             postSettings(DEFAULT_SETTINGS, 'fallback');
         }
     };
