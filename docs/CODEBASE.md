@@ -14,7 +14,7 @@ Defines the storage key, setting defaults, accepted values, and normalization lo
 
 ### `src/js/settings-bridge.js`
 
-Reads `chrome.storage.local`, listens for popup updates, and forwards normalized settings into the page by `window.postMessage`. This split keeps extension APIs out of the main-world player script while preserving the player's ability to patch page-created audio and fetch behavior.
+Reads `chrome.storage.local`, listens for popup updates, and forwards normalized settings into the page through scoped DOM `CustomEvent`s. This avoids polluting ChatGPT's global `window.postMessage` channel while keeping extension APIs out of the main-world player script and preserving the player's ability to patch page-created audio and fetch behavior.
 
 ### `src/js/content-script.js`
 
@@ -38,7 +38,7 @@ Important helpers:
 
 ### `src/popup.html`, `src/css/popup.css`, and `src/js/popup.js`
 
-The popup owns persistent settings for skip intervals and theme. It writes settings to `chrome.storage.local`; the isolated settings bridge observes storage changes and forwards normalized settings into active ChatGPT tabs. The player still appears automatically when ChatGPT starts Read Aloud.
+The popup owns persistent settings for skip intervals and theme. It writes settings to `chrome.storage.local`; the isolated settings bridge observes storage changes and forwards normalized settings into active ChatGPT tabs with extension-scoped DOM events. The player still appears automatically when ChatGPT starts Read Aloud.
 
 ### `preview.html`
 

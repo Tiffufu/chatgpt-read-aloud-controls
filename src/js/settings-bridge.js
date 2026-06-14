@@ -34,13 +34,16 @@
     const { STORAGE_KEY, DEFAULT_SETTINGS, normalizeSettings } = settingsApi;
     const chromeApi = typeof chrome !== 'undefined' ? chrome : null;
 
+    const SETTINGS_EVENT = 'ae-read-aloud-player:settings';
+    const SETTINGS_REQUEST_EVENT = 'ae-read-aloud-player:settings-request';
+
     const postSettings = (settings, reason = 'snapshot') => {
-        window.postMessage({
-            source: 'ae-read-aloud-extension',
-            type: 'AE_PLAYER_SETTINGS',
-            reason,
-            settings: normalizeSettings(settings)
-        }, '*');
+        document.dispatchEvent(new CustomEvent(SETTINGS_EVENT, {
+            detail: {
+                reason,
+                settings: normalizeSettings(settings)
+            }
+        }));
     };
 
     const readStoredSettings = async () => {
@@ -58,10 +61,7 @@
         }
     };
 
-    window.addEventListener('message', (event) => {
-        if (event.source !== window) return;
-        const data = event.data || {};
-        if (data.source !== 'ae-read-aloud-player' || data.type !== 'AE_PLAYER_SETTINGS_REQUEST') return;
+    document.addEventListener(SETTINGS_REQUEST_EVENT, () => {
         sendStoredSettings('requested');
     });
 

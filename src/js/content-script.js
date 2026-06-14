@@ -113,8 +113,9 @@
             speedPillHoverBackground: '#e9e9e9',
             speedMenuText: '#2f2f2f',
             speedMenuActiveText: '#1f1f1f',
-            speedMenuActiveBackground: 'rgb(243,243,243)',
-            speedMenuHoverBackground: 'rgba(0,0,0,0.07)',
+            speedMenuHoverBackground: 'rgba(0,0,0,0.045)',
+            speedMenuActiveBackground: 'rgba(0,0,0,0.075)',
+            speedMenuActiveHoverBackground: 'rgba(0,0,0,0.09)',
             seekTrackElapsed: '#3f3f3f',
             seekTrackRemaining: '#d9d9d9',
             seekThumb: '#d9d9d9',
@@ -137,8 +138,9 @@
             speedPillHoverBackground: 'rgba(255,255,255,0.16)',
             speedMenuText: '#f5f3ef',
             speedMenuActiveText: '#ffffff',
-            speedMenuActiveBackground: 'rgba(255,255,255,0.08)',
-            speedMenuHoverBackground: 'rgba(255,255,255,0.10)',
+            speedMenuHoverBackground: 'rgba(255,255,255,0.07)',
+            speedMenuActiveBackground: 'rgba(255,255,255,0.12)',
+            speedMenuActiveHoverBackground: 'rgba(255,255,255,0.14)',
             seekTrackElapsed: '#f3f3f3',
             seekTrackRemaining: '#56575a',
             seekThumb: '#f3f3f3',
@@ -469,11 +471,11 @@
         applyTheme();
     };
 
+    const SETTINGS_EVENT = 'ae-read-aloud-player:settings';
+    const SETTINGS_REQUEST_EVENT = 'ae-read-aloud-player:settings-request';
+
     const requestPlayerSettings = () => {
-        window.postMessage({
-            source: 'ae-read-aloud-player',
-            type: 'AE_PLAYER_SETTINGS_REQUEST'
-        }, '*');
+        document.dispatchEvent(new CustomEvent(SETTINGS_REQUEST_EVENT));
     };
 
     const closeSpeedMenu = () => {
@@ -569,18 +571,42 @@
         }
     };
 
-    const updateSpeedUi = () => {
+    const renderSpeedOptionButton = (optionBtn) => {
+        if (!optionBtn) return;
         const theme = getPlayerTheme();
+        const isActive = Number(optionBtn.dataset.rate) === playbackRate;
+        const isHovered = optionBtn.dataset.hovered === 'true';
+
+        optionBtn.style.fontWeight = isActive ? '700' : '400';
+        optionBtn.style.color = isActive ? theme.speedMenuActiveText : theme.speedMenuText;
+        if (isActive && isHovered) {
+            optionBtn.style.backgroundColor = theme.speedMenuActiveHoverBackground || theme.speedMenuActiveBackground;
+        } else if (isActive) {
+            optionBtn.style.backgroundColor = theme.speedMenuActiveBackground;
+        } else if (isHovered) {
+            optionBtn.style.backgroundColor = theme.speedMenuHoverBackground;
+        } else {
+            optionBtn.style.backgroundColor = 'transparent';
+        }
+    };
+
+    const setSpeedOptionHoverState = (optionBtn) => {
+        if (!optionBtn) return;
+        optionBtn.addEventListener('mouseenter', () => {
+            optionBtn.dataset.hovered = 'true';
+            renderSpeedOptionButton(optionBtn);
+        });
+        optionBtn.addEventListener('mouseleave', () => {
+            optionBtn.dataset.hovered = 'false';
+            renderSpeedOptionButton(optionBtn);
+        });
+    };
+
+    const updateSpeedUi = () => {
         if (speedBtn) speedBtn.textContent = formatRate(playbackRate);
         if (!speedMenu) return;
 
-        speedMenu.querySelectorAll('button[data-rate]').forEach((optionBtn) => {
-            const isActive = Number(optionBtn.dataset.rate) === playbackRate;
-            optionBtn.style.fontWeight = isActive ? '700' : '400';
-            optionBtn.style.color = isActive ? theme.speedMenuActiveText : theme.speedMenuText;
-            optionBtn.style.backgroundColor = isActive ? theme.speedMenuActiveBackground : 'transparent';
-            refreshButtonHoverState(optionBtn, 'speedMenuHoverBackground');
-        });
+        speedMenu.querySelectorAll('button[data-rate]').forEach(renderSpeedOptionButton);
     };
 
     const updateTimeDisplay = () => {
@@ -825,8 +851,9 @@ const beginDrag = (event) => {
             optionBtn.type = 'button';
             optionBtn.dataset.rate = String(rate);
             optionBtn.textContent = formatRate(rate);
-            optionBtn.style.cssText = `${nakedButtonStyle};display:block;width:100%;height:30px;padding:0 10px;border-radius:8px;text-align:left;font-size:13px;`;
-            setButtonHoverState(optionBtn, 'speedMenuHoverBackground');
+            optionBtn.dataset.hovered = 'false';
+            optionBtn.style.cssText = `${nakedButtonStyle};display:block;width:100%;height:30px;padding:0 10px;border-radius:8px;text-align:left;font-size:13px;transition:background-color 120ms ease;`;
+            setSpeedOptionHoverState(optionBtn);
             optionBtn.onclick = (event) => {
                 event.stopPropagation();
                 applyPlaybackRate(rate);
@@ -1265,11 +1292,8 @@ const beginDrag = (event) => {
         updateControlState();
     };
 
-    window.addEventListener('message', (event) => {
-        if (event.source !== window) return;
-        const data = event.data || {};
-        if (data.source !== 'ae-read-aloud-extension' || data.type !== 'AE_PLAYER_SETTINGS') return;
-        applyPlayerSettings(data.settings);
+    document.addEventListener(SETTINGS_EVENT, (event) => {
+        applyPlayerSettings(event.detail?.settings);
     });
 
     document.addEventListener('click', (event) => {
