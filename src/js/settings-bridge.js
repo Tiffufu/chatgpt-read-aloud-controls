@@ -38,11 +38,13 @@
     const SETTINGS_REQUEST_EVENT = 'ae-read-aloud-player:settings-request';
 
     const postSettings = (settings, reason = 'snapshot') => {
+        const payload = JSON.stringify({
+            reason,
+            settings: normalizeSettings(settings)
+        });
+
         document.dispatchEvent(new CustomEvent(SETTINGS_EVENT, {
-            detail: {
-                reason,
-                settings: normalizeSettings(settings)
-            }
+            detail: payload
         }));
     };
 

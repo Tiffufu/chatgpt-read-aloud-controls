@@ -14,13 +14,14 @@ Defines the storage key, setting defaults, accepted values, and normalization lo
 
 ### `src/js/settings-bridge.js`
 
-Reads `chrome.storage.local`, listens for popup updates, and forwards normalized settings into the page through scoped DOM `CustomEvent`s. This avoids polluting ChatGPT's global `window.postMessage` channel while keeping extension APIs out of the main-world player script and preserving the player's ability to patch page-created audio and fetch behavior.
+Reads `chrome.storage.local`, listens for popup updates, and forwards normalized settings into the page through scoped DOM `CustomEvent`s. Event payloads are JSON strings so the isolated extension world and page/main world do not share live objects. This avoids polluting ChatGPT's global `window.postMessage` channel while keeping extension APIs out of the main-world player script and preserving the player's ability to patch page-created audio and fetch behavior.
 
 ### `src/js/content-script.js`
 
 Owns all player behavior:
 
 - Tracks audio elements created by ChatGPT.
+- Prunes inactive detached audio references so long single-page sessions do not keep stale nodes indefinitely.
 - Scores known audio elements to identify the active Read Aloud stream.
 - Pauses competing audio elements when a new one starts.
 - Captures Read Aloud responses from `fetch()` clones for downloads and enables download only after capture completes.

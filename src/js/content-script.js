@@ -84,6 +84,7 @@
     const PREVIEW_PATH_PATTERN = /(?:^|\/)preview\.html(?:[?#]|$)/i;
     const speedOptions = [0.75, 1, 1.25, 1.5, 2];
     const isPreviewMode = PREVIEW_PATH_PATTERN.test(window.location.href);
+    const MAX_OBSERVED_AUDIO_ELEMENTS = 30;
 
     const normalizePlayerSettings = normalizeSettings;
 
@@ -395,15 +396,49 @@
         && element instanceof HTMLAudioElement
     );
 
+    const getAudioSource = (element) => {
+        if (!element) return '';
+        return `${element.currentSrc || element.src || ''}`;
+    };
+
+    const hasElementSource = (element) => Boolean(element && (getAudioSource(element) || element.srcObject));
+
     const rememberAudioElement = (element) => {
         if (isAudioElement(element)) observedAudioElements.add(element);
         return element;
     };
 
-    const getKnownAudioElements = () => Array.from(new Set([
-        ...observedAudioElements,
-        ...document.querySelectorAll('audio')
-    ])).filter(isAudioElement);
+    const pruneObservedAudioElements = (activeElement = audio) => {
+        observedAudioElements.forEach((element) => {
+            if (!isAudioElement(element)) {
+                observedAudioElements.delete(element);
+                return;
+            }
+
+            const isInactiveDetachedElement = element !== activeElement
+                && !element.isConnected
+                && (element.paused || element.ended || !hasElementSource(element));
+
+            if (isInactiveDetachedElement) observedAudioElements.delete(element);
+        });
+
+        if (observedAudioElements.size <= MAX_OBSERVED_AUDIO_ELEMENTS) return;
+
+        Array.from(observedAudioElements).some((element) => {
+            if (observedAudioElements.size <= MAX_OBSERVED_AUDIO_ELEMENTS) return true;
+            if (element === activeElement || (!element.paused && !element.ended)) return false;
+            observedAudioElements.delete(element);
+            return false;
+        });
+    };
+
+    const getKnownAudioElements = () => {
+        pruneObservedAudioElements();
+        return Array.from(new Set([
+            ...observedAudioElements,
+            ...document.querySelectorAll('audio')
+        ])).filter(isAudioElement);
+    };
 
     const pauseOtherAudioElements = (activeElement) => {
         getKnownAudioElements().forEach((element) => {
@@ -412,12 +447,7 @@
         });
     };
 
-    const getAudioSource = (element) => {
-        if (!element) return '';
-        return `${element.currentSrc || element.src || ''}`;
-    };
-
-    const hasAudioSource = (element = audio) => Boolean(element && (getAudioSource(element) || element.srcObject));
+    const hasAudioSource = (element = audio) => hasElementSource(element);
 
     const getPlaybackKey = (element) => {
         if (!element) return '';
@@ -473,6 +503,18 @@
 
     const SETTINGS_EVENT = 'ae-read-aloud-player:settings';
     const SETTINGS_REQUEST_EVENT = 'ae-read-aloud-player:settings-request';
+
+    const readSettingsEventDetail = (detail) => {
+        if (typeof detail === 'string') {
+            try {
+                return JSON.parse(detail);
+            } catch (_err) {
+                return {};
+            }
+        }
+
+        return detail && typeof detail === 'object' ? detail : {};
+    };
 
     const requestPlayerSettings = () => {
         document.dispatchEvent(new CustomEvent(SETTINGS_REQUEST_EVENT));
@@ -774,60 +816,60 @@
         }
     };
 
-const beginDrag = (event) => {
-    if (!controlsDiv || event.button !== 0) return;
-    if (event.target.closest('button')) return;
+    const beginDrag = (event) => {
+        if (!controlsDiv || event.button !== 0) return;
+        if (event.target.closest('button')) return;
 
-    const clickStartedOnTitle = event.target === trackTitleLabel || trackTitleLabel?.contains(event.target);
+        const clickStartedOnTitle = event.target === trackTitleLabel || trackTitleLabel?.contains(event.target);
 
-    const startClientX = event.clientX;
-    const startClientY = event.clientY;
-    let didDrag = false;
+        const startClientX = event.clientX;
+        const startClientY = event.clientY;
+        let didDrag = false;
 
-    const rect = controlsDiv.getBoundingClientRect();
-    const offsetX = event.clientX - rect.left;
-    const offsetY = event.clientY - rect.top;
+        const rect = controlsDiv.getBoundingClientRect();
+        const offsetX = event.clientX - rect.left;
+        const offsetY = event.clientY - rect.top;
 
-    controlsDiv.style.left = `${rect.left}px`;
-    controlsDiv.style.top = `${rect.top}px`;
-    controlsDiv.style.transform = 'none';
+        controlsDiv.style.left = `${rect.left}px`;
+        controlsDiv.style.top = `${rect.top}px`;
+        controlsDiv.style.transform = 'none';
 
-    const onMouseMove = (moveEvent) => {
-        const movementX = moveEvent.clientX - startClientX;
-        const movementY = moveEvent.clientY - startClientY;
+        const onMouseMove = (moveEvent) => {
+            const movementX = moveEvent.clientX - startClientX;
+            const movementY = moveEvent.clientY - startClientY;
 
-        if (Math.hypot(movementX, movementY) > 4) {
-            didDrag = true;
-        }
+            if (Math.hypot(movementX, movementY) > 4) {
+                didDrag = true;
+            }
 
-        const width = controlsDiv.offsetWidth;
-        const height = controlsDiv.offsetHeight;
-        const nextLeft = Math.min(
-            Math.max(12, moveEvent.clientX - offsetX),
-            Math.max(12, window.innerWidth - width - 12)
-        );
-        const nextTop = Math.min(
-            Math.max(12, moveEvent.clientY - offsetY),
-            Math.max(12, window.innerHeight - height - 12)
-        );
+            const width = controlsDiv.offsetWidth;
+            const height = controlsDiv.offsetHeight;
+            const nextLeft = Math.min(
+                Math.max(12, moveEvent.clientX - offsetX),
+                Math.max(12, window.innerWidth - width - 12)
+            );
+            const nextTop = Math.min(
+                Math.max(12, moveEvent.clientY - offsetY),
+                Math.max(12, window.innerHeight - height - 12)
+            );
 
-        controlsDiv.style.left = `${nextLeft}px`;
-        controlsDiv.style.top = `${nextTop}px`;
+            controlsDiv.style.left = `${nextLeft}px`;
+            controlsDiv.style.top = `${nextTop}px`;
+        };
+
+        const onMouseUp = () => {
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', onMouseUp);
+
+            if (clickStartedOnTitle && !didDrag) {
+                toggleCollapsed();
+            }
+        };
+
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
+        event.preventDefault();
     };
-
-    const onMouseUp = () => {
-        document.removeEventListener('mousemove', onMouseMove);
-        document.removeEventListener('mouseup', onMouseUp);
-
-        if (clickStartedOnTitle && !didDrag) {
-            toggleCollapsed();
-        }
-    };
-
-    document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', onMouseUp);
-    event.preventDefault();
-};
 
     const createSpeedMenu = () => {
         const theme = getPlayerTheme();
@@ -1293,7 +1335,7 @@ const beginDrag = (event) => {
     };
 
     document.addEventListener(SETTINGS_EVENT, (event) => {
-        applyPlayerSettings(event.detail?.settings);
+        applyPlayerSettings(readSettingsEventDetail(event.detail).settings);
     });
 
     document.addEventListener('click', (event) => {

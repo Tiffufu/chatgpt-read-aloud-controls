@@ -1,6 +1,6 @@
 # ChatGPT Read Aloud Player
 
-Private Chrome extension fork that adds a compact, draggable audio player for ChatGPT's Read Aloud feature.
+Chrome extension that adds a compact, draggable audio player for ChatGPT's Read Aloud feature.
 
 ![Screenshot of the extension](images/promo-screenshot.png)
 
@@ -53,5 +53,13 @@ preview.html?ae-theme=dark&ae-duration=420&ae-current=80&ae-rate=2&ae-back=10&ae
 - Prefer small, explicit helpers over adding a build step. The extension currently ships as plain HTML, CSS, and JavaScript.
 - When ChatGPT changes its audio endpoint, update `isSpeechResponse()` and the source scoring in `getObservedAudio()`.
 - Keep attribution updates in `CREDITS.md`.
+
+## Release Checklist
+
+- Run JavaScript syntax checks for every file in `src/js/`.
+- Open `preview.html` with light and dark themes and verify controls, collapse/expand, drag, speed menu, and responsive sizing.
+- Load the unpacked extension in Chrome and test against a fresh `chatgpt.com` tab.
+- Confirm the download button stays disabled until audio capture completes.
+- Review `CREDITS.md` and store imagery before publishing.
 
 See [docs/CODEBASE.md](docs/CODEBASE.md) for the code structure and common change points.

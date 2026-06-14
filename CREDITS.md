@@ -1,6 +1,6 @@
 # Credits
 
-This private fork is based on Ian Speckart's Audio Player for ChatGPT project.
+This extension is based on Ian Speckart's Audio Player for ChatGPT project.
 
 ## drengskapur
 
