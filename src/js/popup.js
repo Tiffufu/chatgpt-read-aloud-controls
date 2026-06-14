@@ -1,52 +1,53 @@
 (function () {
     'use strict';
 
-    const fallbackSettingsApi = (() => {
-        const STORAGE_KEY = 'ae_player_settings';
-        const MIN_SKIP_SECONDS = 1;
-        const MAX_SKIP_SECONDS = 300;
-        const DEFAULT_SETTINGS = Object.freeze({
-            skipBackSeconds: 5,
-            skipForwardSeconds: 5,
-            theme: 'system'
-        });
-        const clampSkipSeconds = (value, fallback) => {
-            const numberValue = Number(value);
-            if (!Number.isFinite(numberValue)) return fallback;
-            return Math.min(MAX_SKIP_SECONDS, Math.max(MIN_SKIP_SECONDS, Math.round(numberValue)));
-        };
-        return Object.freeze({
-            STORAGE_KEY,
-            MIN_SKIP_SECONDS,
-            MAX_SKIP_SECONDS,
-            DEFAULT_SETTINGS,
-            normalizeSettings: (settings = {}) => ({
-                skipBackSeconds: clampSkipSeconds(settings.skipBackSeconds ?? settings.backJumpSeconds, DEFAULT_SETTINGS.skipBackSeconds),
-                skipForwardSeconds: clampSkipSeconds(settings.skipForwardSeconds ?? settings.forwardJumpSeconds, DEFAULT_SETTINGS.skipForwardSeconds),
-                theme: settings.theme === 'light' || settings.theme === 'dark' ? settings.theme : DEFAULT_SETTINGS.theme
-            })
-        });
-    })();
+    const SETTINGS_MODULE_ERROR = 'Settings module failed to load. Reload the extension and try again.';
 
-    const settingsApi = window.AEPlayerSettings || fallbackSettingsApi;
-    const {
-        STORAGE_KEY,
-        MIN_SKIP_SECONDS,
-        MAX_SKIP_SECONDS,
-        DEFAULT_SETTINGS,
-        normalizeSettings
-    } = settingsApi;
+    const getSettingsApi = () => {
+        const api = window.AEPlayerSettings;
+        if (
+            api?.STORAGE_KEY
+            && api?.DEFAULT_SETTINGS
+            && api?.PLAYBACK_RATE_OPTIONS
+            && typeof api.normalizeSettings === 'function'
+        ) {
+            return api;
+        }
+        console.error('[Read Aloud Controls for ChatGPT] Shared settings module is missing.');
+        return null;
+    };
 
     const chromeApi = typeof chrome !== 'undefined' ? chrome : null;
+    const settingsApi = getSettingsApi();
 
     const form = document.getElementById('settingsForm');
     const skipBackInput = document.getElementById('skipBackSeconds');
     const skipForwardInput = document.getElementById('skipForwardSeconds');
+    const playbackRateSelect = document.getElementById('playbackRate');
     const themeSelect = document.getElementById('theme');
     const status = document.getElementById('status');
 
+    if (!settingsApi) {
+        status.textContent = SETTINGS_MODULE_ERROR;
+        form.querySelectorAll('input, select, button').forEach((control) => {
+            control.disabled = true;
+        });
+        return;
+    }
+
+    const {
+        STORAGE_KEY,
+        MIN_SKIP_SECONDS,
+        MAX_SKIP_SECONDS,
+        PLAYBACK_RATE_OPTIONS,
+        DEFAULT_SETTINGS,
+        normalizeSettings
+    } = settingsApi;
+
     let settings = { ...DEFAULT_SETTINGS };
     let statusTimer = null;
+
+    const formatRate = (rate) => `${String(rate).replace(/\.0$/, '')}x`;
 
     const setNumberBounds = (input) => {
         input.min = String(MIN_SKIP_SECONDS);
@@ -61,15 +62,26 @@
         }, 1800);
     };
 
+    const populatePlaybackRateOptions = () => {
+        playbackRateSelect.replaceChildren(...PLAYBACK_RATE_OPTIONS.map((rate) => {
+            const option = document.createElement('option');
+            option.value = String(rate);
+            option.textContent = formatRate(rate);
+            return option;
+        }));
+    };
+
     const render = () => {
         skipBackInput.value = settings.skipBackSeconds;
         skipForwardInput.value = settings.skipForwardSeconds;
+        playbackRateSelect.value = String(settings.playbackRate);
         themeSelect.value = settings.theme;
     };
 
     const readForm = () => normalizeSettings({
         skipBackSeconds: skipBackInput.value,
         skipForwardSeconds: skipForwardInput.value,
+        playbackRate: playbackRateSelect.value,
         theme: themeSelect.value
     });
 
@@ -85,6 +97,7 @@
     const initialize = async () => {
         setNumberBounds(skipBackInput);
         setNumberBounds(skipForwardInput);
+        populatePlaybackRateOptions();
 
         try {
             const result = chromeApi?.storage?.local
@@ -108,6 +121,7 @@
             input.addEventListener('blur', persist);
         });
 
+        playbackRateSelect.addEventListener('change', persist);
         themeSelect.addEventListener('change', persist);
     };
 

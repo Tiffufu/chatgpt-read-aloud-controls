@@ -4,18 +4,18 @@
   "description": "Adds a floating player with seek, speed, skip, theme, and download controls for ChatGPT Read Aloud.",
   "action": {
     "default_icon": {
-      "16": "assets/icon16.png",
-      "32": "assets/icon32.png",
-      "48": "assets/icon48.png",
-      "128": "assets/icon128.png"
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
     },
     "default_popup": "src/popup.html"
   },
   "icons": {
-    "16": "assets/icon16.png",
-    "32": "assets/icon32.png",
-    "48": "assets/icon48.png",
-    "128": "assets/icon128.png"
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
   },
   "content_scripts": [
     {
@@ -23,7 +23,6 @@
         "https://chatgpt.com/*"
       ],
       "js": [
-        "src/js/player-settings.js",
         "src/js/settings-bridge.js"
       ],
       "run_at": "document_start"

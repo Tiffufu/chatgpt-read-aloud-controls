@@ -37,15 +37,16 @@ The player appears automatically after ChatGPT starts a Read Aloud audio stream.
 
 Open the extension icon to configure player settings:
 
-- **Skip back seconds**: number of seconds moved by the back button.
-- **Skip forward seconds**: number of seconds moved by the forward button.
+- **Skip back seconds**: number of seconds moved by the back button. Fresh installs default to 15 seconds.
+- **Skip forward seconds**: number of seconds moved by the forward button. Fresh installs default to 15 seconds.
+- **Default playback speed**: the speed applied to active and future Read Aloud playback.
 - **Theme**: follow system, light, or dark.
 
-Settings are saved with `chrome.storage.local` and forwarded to active ChatGPT tabs by the extension settings bridge.
+Settings are saved with `chrome.storage.local` and forwarded to active ChatGPT tabs by the extension settings bridge. Defaults, speed options, limits, and validation are defined only in `src/js/player-settings.js`; other scripts consume that shared settings contract rather than carrying duplicate defaults.
 
 ## Download behavior
 
-The download button stays visible but disabled while audio capture is still loading. It enables only when the active Read Aloud response has fully completed capture. This avoids accidental partial downloads.
+The download button stays visible but disabled while audio capture is still loading. It enables only when the active Read Aloud response has fully completed capture. This avoids accidental partial downloads. Starting a download does not change the icon; Chrome's own download UI provides confirmation while the player keeps the control stable and repeatable.
 
 The downloaded file is built from the audio response captured while ChatGPT is streaming Read Aloud audio. The extension does not depend on re-fetching the audio element source after playback.
 
@@ -64,7 +65,7 @@ Supported preview parameters:
 - `ae-theme=light|dark`
 - `ae-duration=<seconds>`
 - `ae-current=<seconds>`
-- `ae-rate=<number>`
+- `ae-rate=<supported speed>`
 - `ae-back=<seconds>`
 - `ae-forward=<seconds>`
 - `ae-download=loading|ready|failed`
@@ -110,7 +111,7 @@ Debug output uses the `[AE Player]` prefix.
 Contributions should preserve the extension's runtime boundaries:
 
 - Popup code may use extension APIs.
-- `settings-bridge.js` may use extension APIs and forwards settings through scoped DOM `CustomEvent`s.
+- `settings-bridge.js` may use extension APIs and forwards raw settings through scoped DOM `CustomEvent`s.
 - `content-script.js` runs in the page's main world and must remain able to observe page-created audio elements and wrap `window.fetch`.
 - Do not use `window.postMessage` for internal extension settings traffic.
 - Avoid broad refactors of audio detection, fetch interception, or element tracking unless tied to a specific defect.
@@ -125,7 +126,7 @@ Before opening a pull request:
 6. Reload a fresh `chatgpt.com` tab.
 7. Start Read Aloud and confirm the player appears.
 8. Confirm the speed menu hover and selected states are stable.
-9. Confirm the download button stays disabled until capture completes.
+9. Confirm the download button stays disabled until capture completes and returns to its non-hover resting state after downloading.
 10. Confirm DevTools is not flooded with extension-origin console messages.
 
 ## Attribution

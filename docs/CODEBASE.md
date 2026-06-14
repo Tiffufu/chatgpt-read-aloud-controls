@@ -6,15 +6,15 @@ Read Aloud Controls for ChatGPT is a Manifest V3 extension with a popup settings
 
 ### `manifest.json`
 
-Registers extension metadata, popup, icons, shared settings schema, the isolated settings bridge, and the ChatGPT player script. The player script runs at `document_start` in the page's main world so it can observe page-created audio elements and wrap `window.fetch`. The bridge runs in the default isolated world so it can access extension APIs.
+Registers extension metadata, popup, icons, the isolated settings bridge, the shared main-world settings schema, and the ChatGPT player script. The player script runs at `document_start` in the page's main world so it can observe page-created audio elements and wrap `window.fetch`. The bridge runs in the default isolated world so it can access extension APIs.
 
 ### `src/js/player-settings.js`
 
-Defines the storage key, setting defaults, accepted values, and normalization logic. It is dependency-free because it loads in the popup, the isolated content-script world, and the page main world.
+Defines the storage key, setting defaults, playback speed options, accepted values, and normalization logic. This is the only source of truth for settings defaults. It is dependency-free because it loads in the popup and the page main world.
 
 ### `src/js/settings-bridge.js`
 
-Reads `chrome.storage.local`, listens for popup updates, and forwards normalized settings into the page through scoped DOM `CustomEvent`s. This avoids polluting ChatGPT's global `window.postMessage` channel while keeping extension APIs out of the main-world player script.
+Reads `chrome.storage.local`, listens for popup updates, accepts scoped player-originated settings update requests, and forwards raw settings into the page through scoped DOM `CustomEvent`s. This avoids polluting ChatGPT's global `window.postMessage` channel while keeping extension APIs out of the main-world player script.
 
 ### `src/js/content-script.js`
 
@@ -27,22 +27,24 @@ Owns the injected player runtime:
 - Stores active capture/download state in `playerSession`.
 - Enables audio download only after capture completes.
 - Builds the floating player UI directly in the page.
-- Applies popup-controlled skip intervals and theme choice.
+- Applies popup-controlled skip intervals, playback speed, and theme choice.
 - Keeps timeline, speed, and play/pause state synchronized while the tab is visible.
 
 Important helpers:
 
 - `getObservedAudio()` chooses the best active audio element.
 - `isSpeechResponse()` decides whether a fetch response should be captured for download.
+- `createSettingsApiFallback()` is a last-resort guard for stale unpacked-extension manifests that run the player without the shared settings helper.
 - `playerSession` owns active capture state, MIME type, chunks, and playback key.
 - `updateDownloadButtonState()` derives the download affordance from the current session.
+- `closePlayer()` marks the active playback dismissed, pauses tracked audio, and tears down the UI.
 - `buildControls()` constructs the floating player UI.
-- `updateControlState()` refreshes enabled/disabled state, speed labels, play/pause icon, and time labels.
+- `updateControlState()` refreshes enabled/disabled state, speed labels, play/pause icon, download readiness state, and time labels.
 - `initializePreviewMode()` renders the same UI in `preview.html` without a ChatGPT stream.
 
 ### `src/popup.html`, `src/css/popup.css`, and `src/js/popup.js`
 
-The popup owns persistent settings for skip intervals and theme. It writes settings to `chrome.storage.local`; the isolated settings bridge observes storage changes and forwards normalized settings into active ChatGPT tabs with extension-scoped DOM events.
+The popup owns persistent settings for skip intervals, default playback speed, and theme. It writes settings to `chrome.storage.local`; the isolated settings bridge observes storage changes and forwards raw settings into active ChatGPT tabs with extension-scoped DOM events. Popup code should consume `window.AEPlayerSettings` and fail clearly if the shared settings module is missing.
 
 ### `preview.html`
 
@@ -60,11 +62,11 @@ Local UI harness for maintainers. It loads the production content script and pas
 
 ### Add a playback speed
 
-Update the `speedOptions` array in `src/js/content-script.js`. The menu, active state, persistence, and label formatting are derived from that array.
+Update `PLAYBACK_RATE_OPTIONS` in `src/js/player-settings.js`. The popup select, player speed menu, active state, persistence, and label formatting are derived from that shared array.
 
 ### Adjust configurable controls
 
-Defaults and validation live in `src/js/player-settings.js`. Keep popup field names, stored setting keys, and player setting names aligned with that shared schema.
+Defaults and validation live canonically in `src/js/player-settings.js`. Keep popup field names, stored setting keys, and player setting names aligned with that shared schema. The only fallback copy belongs to `content-script.js` so the player can still run if Chrome fails to inject the shared helper first.
 
 ### Adjust player colors
 
@@ -77,6 +79,10 @@ Update `ensurePlayerStyles()` for browser range-input track and thumb styling. K
 ### Update audio endpoint detection
 
 Update both `isSpeechResponse()` and endpoint scoring inside `getObservedAudio()`. The first controls download capture; the second helps choose the active audio element.
+
+## Button rendering
+
+Icon buttons are rendered from semantic state instead of inferred DOM styles. `renderIconButton()` owns icon, label, enabled state, tone, and resting background. Hover is stored separately as interaction state and is recomputed from the current theme. Do not derive a button's idle state from `button.style.backgroundColor`; that can accidentally persist hover or pressed styles as the resting state.
 
 ## Verification
 

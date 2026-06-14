@@ -29,46 +29,110 @@
     let monitorIntervalId = null;
     let uiSyncIntervalId = null;
     let audioTrackingInstalled = false;
+    let isPlayerDismissed = false;
 
-    let playbackRate = Number(localStorage.getItem('ae_playbackRate') || 1);
-    if (!Number.isFinite(playbackRate) || playbackRate <= 0) playbackRate = 1;
-
-    const fallbackPlayerSettingsApi = (() => {
-        const MIN_SKIP_SECONDS = 1;
-        const MAX_SKIP_SECONDS = 300;
-        const DEFAULT_SETTINGS = Object.freeze({
-            skipBackSeconds: 5,
-            skipForwardSeconds: 5,
-            theme: 'system'
+    const createSettingsApiFallback = () => {
+        const playbackRateOptions = Object.freeze([0.75, 1, 1.25, 1.5, 2]);
+        const theme = Object.freeze({
+            SYSTEM: 'system',
+            LIGHT: 'light',
+            DARK: 'dark'
         });
+        const defaults = Object.freeze({
+            skipBackSeconds: 15,
+            skipForwardSeconds: 15,
+            playbackRate: 1,
+            theme: theme.SYSTEM
+        });
+        const minSkipSeconds = 1;
+        const maxSkipSeconds = 300;
         const clampSkipSeconds = (value, fallback) => {
             const numberValue = Number(value);
             if (!Number.isFinite(numberValue)) return fallback;
-            return Math.min(MAX_SKIP_SECONDS, Math.max(MIN_SKIP_SECONDS, Math.round(numberValue)));
+            return Math.min(maxSkipSeconds, Math.max(minSkipSeconds, Math.round(numberValue)));
         };
         const normalizeTheme = (value) => (
-            value === 'light' || value === 'dark' ? value : DEFAULT_SETTINGS.theme
+            value === theme.LIGHT || value === theme.DARK ? value : theme.SYSTEM
         );
+        const isSupportedPlaybackRate = (value) => (
+            playbackRateOptions.includes(Number(value))
+        );
+        const normalizePlaybackRate = (value, fallback = defaults.playbackRate) => {
+            if (isSupportedPlaybackRate(value)) return Number(value);
+            if (isSupportedPlaybackRate(fallback)) return Number(fallback);
+            return defaults.playbackRate;
+        };
+
         return Object.freeze({
-            DEFAULT_SETTINGS,
+            STORAGE_KEY: 'ae_player_settings',
+            LEGACY_PLAYBACK_RATE_STORAGE_KEY: 'ae_playbackRate',
+            MIN_SKIP_SECONDS: minSkipSeconds,
+            MAX_SKIP_SECONDS: maxSkipSeconds,
+            PLAYBACK_RATE_OPTIONS: playbackRateOptions,
+            THEME: theme,
+            DEFAULT_SETTINGS: defaults,
+            isSupportedPlaybackRate,
+            normalizePlaybackRate,
             normalizeSettings: (settings = {}) => ({
                 skipBackSeconds: clampSkipSeconds(
                     settings.skipBackSeconds ?? settings.backJumpSeconds,
-                    DEFAULT_SETTINGS.skipBackSeconds
+                    defaults.skipBackSeconds
                 ),
                 skipForwardSeconds: clampSkipSeconds(
                     settings.skipForwardSeconds ?? settings.forwardJumpSeconds,
-                    DEFAULT_SETTINGS.skipForwardSeconds
+                    defaults.skipForwardSeconds
+                ),
+                playbackRate: normalizePlaybackRate(
+                    settings.playbackRate ?? settings.playbackSpeed ?? settings.defaultPlaybackRate
                 ),
                 theme: normalizeTheme(settings.theme)
             })
         });
-    })();
+    };
 
-    const playerSettingsApi = window.AEPlayerSettings || fallbackPlayerSettingsApi;
-    const { DEFAULT_SETTINGS: DEFAULT_PLAYER_SETTINGS, normalizeSettings } = playerSettingsApi;
+    const getSettingsApi = () => {
+        const api = window.AEPlayerSettings;
+        if (
+            api?.DEFAULT_SETTINGS
+            && api?.PLAYBACK_RATE_OPTIONS
+            && typeof api.isSupportedPlaybackRate === 'function'
+            && typeof api.normalizePlaybackRate === 'function'
+            && typeof api.normalizeSettings === 'function'
+        ) {
+            return api;
+        }
+        console.warn('[Read Aloud Controls for ChatGPT] Shared settings module is missing; using player runtime fallback.');
+        return createSettingsApiFallback();
+    };
 
-    let playerSettings = { ...DEFAULT_PLAYER_SETTINGS };
+    const playerSettingsApi = getSettingsApi();
+
+    const {
+        DEFAULT_SETTINGS: DEFAULT_PLAYER_SETTINGS,
+        LEGACY_PLAYBACK_RATE_STORAGE_KEY,
+        PLAYBACK_RATE_OPTIONS,
+        isSupportedPlaybackRate,
+        normalizePlaybackRate,
+        normalizeSettings
+    } = playerSettingsApi;
+
+    const normalizePlayerSettings = normalizeSettings;
+
+    const getLegacyPlaybackRate = () => {
+        try {
+            const storedRate = localStorage.getItem(LEGACY_PLAYBACK_RATE_STORAGE_KEY);
+            return isSupportedPlaybackRate(storedRate) ? Number(storedRate) : null;
+        } catch (_err) {
+            return null;
+        }
+    };
+
+    const legacyPlaybackRate = getLegacyPlaybackRate();
+    let playerSettings = normalizePlayerSettings({
+        ...DEFAULT_PLAYER_SETTINGS,
+        playbackRate: legacyPlaybackRate ?? DEFAULT_PLAYER_SETTINGS.playbackRate
+    });
+    let playbackRate = playerSettings.playbackRate;
 
     const CAPTURE_STATE = Object.freeze({
         IDLE: 'idle',
@@ -97,9 +161,7 @@
 
     const DEFAULT_TRACK_TITLE = 'Read aloud';
     const PREVIEW_PATH_PATTERN = /(?:^|\/)preview\.html(?:[?#]|$)/i;
-    const speedOptions = [0.75, 1, 1.25, 1.5, 2];
     const isPreviewMode = PREVIEW_PATH_PATTERN.test(window.location.href);
-    const normalizePlayerSettings = normalizeSettings;
 
     const debugLog = (...args) => {
         try {
@@ -237,26 +299,45 @@
         download: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="size-6"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v10m0 0 4-4m-4 4-4-4M5 18h14" /></svg>'
     };
 
+    const getButtonIdleBackground = (button) => {
+        if (!button) return 'transparent';
+        if (button.dataset.buttonKind === 'speed-pill') return getPlayerTheme().speedPillBackground;
+        return 'transparent';
+    };
+
+    const getButtonHoverBackground = (button) => {
+        if (!button || button.disabled) return getButtonIdleBackground(button);
+        const theme = getPlayerTheme();
+        const token = button.dataset.hoverToken || 'controlHoverBackground';
+        return theme[token] || token;
+    };
+
+    const renderButtonInteractionState = (button) => {
+        if (!button) return;
+        const hovered = button.dataset.hovered === 'true';
+        button.style.backgroundColor = hovered
+            ? getButtonHoverBackground(button)
+            : getButtonIdleBackground(button);
+        button.style.transform = hovered && !button.disabled ? 'translateY(-1px)' : 'none';
+    };
+
     const refreshButtonHoverState = (button, hoverToken) => {
         if (!button) return;
-        const theme = getPlayerTheme();
-        const token = hoverToken || button.dataset.hoverToken || 'controlHoverBackground';
-        button.dataset.hoverToken = token;
-        button.dataset.hoverColor = theme[token] || token;
-        button.dataset.idleBackground = button.style.backgroundColor || 'transparent';
+        if (hoverToken) button.dataset.hoverToken = hoverToken;
+        if (!button.dataset.hoverToken) button.dataset.hoverToken = 'controlHoverBackground';
+        renderButtonInteractionState(button);
     };
 
     const setButtonHoverState = (button, hoverToken = 'controlHoverBackground') => {
         if (!button) return;
         refreshButtonHoverState(button, hoverToken);
         button.addEventListener('mouseenter', () => {
-            if (button.disabled) return;
-            button.style.backgroundColor = button.dataset.hoverColor || getPlayerTheme().controlHoverBackground;
-            button.style.transform = 'translateY(-1px)';
+            button.dataset.hovered = 'true';
+            renderButtonInteractionState(button);
         });
         button.addEventListener('mouseleave', () => {
-            button.style.backgroundColor = button.dataset.idleBackground || 'transparent';
-            button.style.transform = 'none';
+            button.dataset.hovered = 'false';
+            renderButtonInteractionState(button);
         });
     };
 
@@ -267,14 +348,38 @@
         return 18;
     };
 
-    const setIconButton = (button, iconName, label, size = 24, hoverToken) => {
+    const renderIconButton = (button, {
+        iconName,
+        label,
+        size,
+        enabled = !button.disabled,
+        tone = 'default',
+        hoverToken
+    }) => {
+        if (!button) return;
+
+        const nextSize = Number(size || button.dataset.buttonSize || 24);
         button.type = 'button';
-        button.innerHTML = iconMarkup[iconName] || '';
-        button.dataset.iconName = iconName;
-        button.dataset.buttonSize = String(size);
-        button.setAttribute('aria-label', label);
-        button.title = label;
-        button.style.cssText = `${iconButtonStyle};width:${size}px;height:${size}px;`;
+        button.dataset.buttonKind = 'icon';
+        button.dataset.buttonTone = tone;
+        button.dataset.buttonSize = String(nextSize);
+        if (hoverToken) button.dataset.hoverToken = hoverToken;
+        if (!button.dataset.hoverToken) button.dataset.hoverToken = 'controlHoverBackground';
+        button.disabled = !enabled;
+        button.style.cssText = `${iconButtonStyle};width:${nextSize}px;height:${nextSize}px;`;
+        button.style.opacity = enabled ? '1' : '0.45';
+        button.style.cursor = enabled ? 'pointer' : 'default';
+
+        if (button.dataset.iconName !== iconName) {
+            button.innerHTML = iconMarkup[iconName] || '';
+            button.dataset.iconName = iconName;
+        }
+
+        if (button.getAttribute('aria-label') !== label || button.title !== label) {
+            button.setAttribute('aria-label', label);
+            button.title = label;
+        }
+
         const svg = button.querySelector('svg');
         if (svg) {
             const svgSize = getSvgSize(button);
@@ -282,32 +387,25 @@
             svg.style.height = `${svgSize}px`;
             svg.style.display = 'block';
         }
+
+        renderButtonInteractionState(button);
+    };
+
+    const setIconButton = (button, iconName, label, size = 24, hoverToken) => {
+        renderIconButton(button, { iconName, label, size, enabled: true, hoverToken });
         setButtonHoverState(button, hoverToken);
     };
 
-    const refreshIconButton = (button, iconName, label) => {
+    const refreshIconButton = (button, iconName, label, options = {}) => {
         if (!button) return;
-        const needsIconUpdate = button.dataset.iconName !== iconName;
-        const needsLabelUpdate = button.getAttribute('aria-label') !== label || button.title !== label;
-
-        if (!needsIconUpdate && !needsLabelUpdate) return;
-
-        if (needsIconUpdate) {
-            button.innerHTML = iconMarkup[iconName] || '';
-            button.dataset.iconName = iconName;
-            const svg = button.querySelector('svg');
-            if (svg) {
-                const svgSize = getSvgSize(button);
-                svg.style.width = `${svgSize}px`;
-                svg.style.height = `${svgSize}px`;
-                svg.style.display = 'block';
-            }
-        }
-
-        if (needsLabelUpdate) {
-            button.setAttribute('aria-label', label);
-            button.title = label;
-        }
+        renderIconButton(button, {
+            iconName,
+            label,
+            size: Number(button.dataset.buttonSize || options.size || 24),
+            enabled: options.enabled ?? !button.disabled,
+            tone: options.tone || button.dataset.buttonTone || 'default',
+            hoverToken: options.hoverToken
+        });
     };
 
     const createIconButton = (iconName, label, size = 24, hoverToken) => {
@@ -404,9 +502,7 @@
         return `${mins}:${secs}`;
     };
 
-    const getEffectivePlaybackRate = () => (
-        Number.isFinite(playbackRate) && playbackRate > 0 ? playbackRate : 1
-    );
+    const getEffectivePlaybackRate = () => normalizePlaybackRate(playbackRate);
 
     const getClampedAudioTime = () => {
         if (!audio || !Number.isFinite(audio.currentTime)) return Number.NaN;
@@ -458,10 +554,15 @@
         ...document.querySelectorAll('audio')
     ])).filter(isAudioElement);
 
+    const pauseAudioElement = (element) => {
+        if (!element || element.paused || element.ended) return;
+        element.pause?.();
+    };
+
     const pauseOtherAudioElements = (activeElement) => {
         getKnownAudioElements().forEach((element) => {
             if (element === activeElement || element.paused || element.ended) return;
-            element.pause();
+            pauseAudioElement(element);
         });
     };
 
@@ -474,6 +575,21 @@
         if (element.srcObject) return `srcObject:${element.srcObject.id || 'stream'}`;
         return '';
     };
+
+    const clearPlayerDismissal = () => {
+        dismissedPlaybackKey = null;
+        isPlayerDismissed = false;
+    };
+
+    const dismissPlayerForAudio = (element) => {
+        isPlayerDismissed = true;
+        dismissedPlaybackKey = getPlaybackKey(element) || trackTitlePlaybackKey || dismissedPlaybackKey;
+    };
+
+    const isDismissedPlayback = (element) => (
+        isPlayerDismissed
+        && (!dismissedPlaybackKey || dismissedPlaybackKey === getPlaybackKey(element))
+    );
 
     const getObservedAudio = () => {
         const audioElements = getKnownAudioElements();
@@ -503,9 +619,14 @@
 
     const setButtonEnabled = (button, enabled) => {
         if (!button) return;
+        if (button.dataset.buttonKind === 'icon') {
+            refreshIconButton(button, button.dataset.iconName || 'play', button.getAttribute('aria-label') || button.title || '', { enabled });
+            return;
+        }
         button.disabled = !enabled;
         button.style.opacity = enabled ? '1' : '0.45';
         button.style.cursor = enabled ? 'pointer' : 'default';
+        renderButtonInteractionState(button);
     };
 
     const updateJumpButtonLabels = () => {
@@ -515,15 +636,39 @@
 
     const applyPlayerSettings = (settings = {}) => {
         playerSettings = normalizePlayerSettings({ ...playerSettings, ...settings });
+        playbackRate = playerSettings.playbackRate;
+        if (audio) audio.playbackRate = playbackRate;
         updateJumpButtonLabels();
         applyTheme();
+        updateControlState();
     };
 
     const SETTINGS_EVENT = 'ae-read-aloud-player:settings';
     const SETTINGS_REQUEST_EVENT = 'ae-read-aloud-player:settings-request';
+    const SETTINGS_UPDATE_REQUEST_EVENT = 'ae-read-aloud-player:settings-update-request';
 
     const requestPlayerSettings = () => {
         document.dispatchEvent(new CustomEvent(SETTINGS_REQUEST_EVENT));
+    };
+
+    const requestPlayerSettingsUpdate = (settings) => {
+        document.dispatchEvent(new CustomEvent(SETTINGS_UPDATE_REQUEST_EVENT, {
+            detail: { settings }
+        }));
+    };
+
+    const migrateLegacyPlaybackRate = () => {
+        if (legacyPlaybackRate === null) return;
+
+        if (legacyPlaybackRate !== DEFAULT_PLAYER_SETTINGS.playbackRate) {
+            requestPlayerSettingsUpdate({ playbackRate: legacyPlaybackRate });
+        }
+
+        try {
+            localStorage.removeItem(LEGACY_PLAYBACK_RATE_STORAGE_KEY);
+        } catch (_err) {
+            // Legacy storage cleanup should never affect playback.
+        }
     };
 
     const closeSpeedMenu = () => {
@@ -575,7 +720,6 @@
         }
 
         if (speedBtn) {
-            speedBtn.style.background = theme.speedPillBackground;
             speedBtn.style.color = theme.speedPillText;
             refreshButtonHoverState(speedBtn, 'speedPillHoverBackground');
         }
@@ -720,10 +864,13 @@
 
     const updateDownloadButtonState = () => {
         if (!downloadBtn) return;
-        const canDownload = isDownloadReady();
-        const downloadLabel = getDownloadLabel();
-        setButtonEnabled(downloadBtn, canDownload);
-        refreshIconButton(downloadBtn, 'download', downloadLabel);
+
+        if (!isDownloadReady()) {
+            refreshIconButton(downloadBtn, 'download', getDownloadLabel(), { enabled: false });
+            return;
+        }
+
+        refreshIconButton(downloadBtn, 'download', 'Download audio', { enabled: true, tone: 'default' });
     };
 
     const updateControlState = () => {
@@ -741,9 +888,13 @@
     };
 
     const applyPlaybackRate = (nextRate) => {
-        playbackRate = nextRate;
-        localStorage.setItem('ae_playbackRate', String(playbackRate));
+        playerSettings = normalizePlayerSettings({
+            ...playerSettings,
+            playbackRate: normalizePlaybackRate(nextRate, playbackRate)
+        });
+        playbackRate = playerSettings.playbackRate;
         if (audio) audio.playbackRate = playbackRate;
+        requestPlayerSettingsUpdate({ playbackRate });
         updateSpeedUi();
         updateTimeDisplay();
         closeSpeedMenu();
@@ -808,15 +959,17 @@
 
     const closePlayer = () => {
         const currentAudio = getObservedAudio() || audio;
-        const playbackKey = getPlaybackKey(currentAudio);
-        dismissedPlaybackKey = playbackKey || (currentAudio && !currentAudio.paused ? playbackKey : null);
 
-        if (currentAudio && !currentAudio.paused && !currentAudio.ended) {
-            currentAudio.pause();
+        dismissPlayerForAudio(currentAudio);
+
+        try {
+            pauseAudioElement(currentAudio);
+            pauseOtherAudioElements(currentAudio);
+        } catch (err) {
+            console.error('[Read Aloud Controls for ChatGPT] Failed to pause audio while closing player', err);
+        } finally {
+            teardownControls();
         }
-        pauseOtherAudioElements(currentAudio);
-
-        teardownControls();
     };
 
     const toggleCollapsed = () => {
@@ -900,7 +1053,7 @@
             'z-index:2'
         ].join(';');
 
-        speedOptions.forEach((rate) => {
+        PLAYBACK_RATE_OPTIONS.forEach((rate) => {
             const optionBtn = document.createElement('button');
             optionBtn.type = 'button';
             optionBtn.dataset.rate = String(rate);
@@ -985,7 +1138,11 @@
         minimizeBtn.onclick = toggleCollapsed;
 
         const closeBtn = createIconButton('close', 'Close player', 36, 'dangerHoverBackground');
-        closeBtn.onclick = closePlayer;
+        closeBtn.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            closePlayer();
+        });
 
         contentDiv = document.createElement('div');
         contentDiv.style.cssText = [
@@ -999,6 +1156,7 @@
 
         speedBtn = document.createElement('button');
         speedBtn.type = 'button';
+        speedBtn.dataset.buttonKind = 'speed-pill';
         speedBtn.title = 'Playback speed';
         speedBtn.style.cssText = `${nakedButtonStyle};height:28px;min-width:58px;padding:0 10px;border-radius:999px;background:${theme.speedPillBackground};font-size:13px;font-weight:650;color:${theme.speedPillText};text-align:center;`;
         setButtonHoverState(speedBtn, 'speedPillHoverBackground');
@@ -1218,7 +1376,7 @@
 
         const currentKey = getPlaybackKey(audio);
         if (currentKey && previousKey && currentKey !== previousKey) {
-            dismissedPlaybackKey = null;
+            clearPlayerDismissal();
         }
 
         if (audio && !audio.paused && currentKey && currentKey !== trackTitlePlaybackKey) {
@@ -1226,18 +1384,20 @@
         }
 
         if (!audio || !hasAudioSource()) {
-            dismissedPlaybackKey = null;
+            clearPlayerDismissal();
+            teardownControls();
+            return;
+        }
+
+        if (isDismissedPlayback(audio)) {
             teardownControls();
             return;
         }
 
         if (audio.paused) {
-            if (dismissedPlaybackKey === currentKey) dismissedPlaybackKey = null;
             if (controlsDiv) startUiSync();
             return;
         }
-
-        if (dismissedPlaybackKey && dismissedPlaybackKey === currentKey) return;
 
         pauseOtherAudioElements(audio);
         buildControls();
@@ -1288,7 +1448,7 @@
                 if (shouldTrack) {
                     rememberAudioElement(this);
                     pauseOtherAudioElements(this);
-                    if (!controlsDiv) dismissedPlaybackKey = null;
+                    if (!controlsDiv && !isDismissedPlayback(this)) clearPlayerDismissal();
                     audio = this;
                     startMonitoring();
                 }
@@ -1326,8 +1486,12 @@
             skipForwardSeconds: previewParams.get('ae-forward') || playerSettings.skipForwardSeconds
         });
 
-        if (Number.isFinite(previewRate) && previewRate > 0) {
-            playbackRate = previewRate;
+        if (isSupportedPlaybackRate(previewRate)) {
+            playerSettings = normalizePlayerSettings({
+                ...playerSettings,
+                playbackRate: previewRate
+            });
+            playbackRate = playerSettings.playbackRate;
         }
 
         if (Number.isFinite(previewDuration) && previewDuration > 0) {
@@ -1397,6 +1561,7 @@
         return;
     }
 
+    migrateLegacyPlaybackRate();
     installAudioElementTracking();
 
     document.addEventListener('visibilitychange', () => {
