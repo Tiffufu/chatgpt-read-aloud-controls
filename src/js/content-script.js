@@ -161,7 +161,10 @@
 
     const DEFAULT_TRACK_TITLE = 'Read aloud';
     const PREVIEW_PATH_PATTERN = /(?:^|\/)preview\.html(?:[?#]|$)/i;
+    const READ_ALOUD_RESPONSE_PATH_PATTERN = /\/backend-api\/(?:synthesize|speech\/generation)(?:[/?#]|$)/;
+    const READ_ALOUD_AUDIO_ASSOCIATION_WINDOW_MS = 15000;
     const isPreviewMode = PREVIEW_PATH_PATTERN.test(window.location.href);
+    let lastReadAloudResponseAt = 0;
 
     const debugLog = (...args) => {
         try {
@@ -174,6 +177,14 @@
     };
 
     const isCurrentSession = (sessionId) => playerSession.id === sessionId;
+    const isReadAloudResponseUrl = (url) => READ_ALOUD_RESPONSE_PATH_PATTERN.test(`${url || ''}`);
+    const hasRecentReadAloudResponse = () => (
+        lastReadAloudResponseAt > 0
+        && Date.now() - lastReadAloudResponseAt <= READ_ALOUD_AUDIO_ASSOCIATION_WINDOW_MS
+    );
+    const markReadAloudResponseSeen = () => {
+        lastReadAloudResponseAt = Date.now();
+    };
     const isDownloadReady = () => (
         playerSession.captureState === CAPTURE_STATE.READY && playerSession.chunks.length > 0
     );
@@ -560,8 +571,17 @@
     };
 
     const pauseOtherAudioElements = (activeElement) => {
+        if (!isReadAloudAudioElement(activeElement)) return;
+
         getKnownAudioElements().forEach((element) => {
-            if (element === activeElement || element.paused || element.ended) return;
+            if (
+                element === activeElement
+                || element.paused
+                || element.ended
+                || !isReadAloudAudioElement(element)
+            ) {
+                return;
+            }
             pauseAudioElement(element);
         });
     };
@@ -574,6 +594,37 @@
         if (source) return source;
         if (element.srcObject) return `srcObject:${element.srcObject.id || 'stream'}`;
         return '';
+    };
+
+    const isCurrentReadAloudSessionAudio = (element) => {
+        if (!element || playerSession.captureState === CAPTURE_STATE.IDLE) return false;
+
+        const playbackKey = getPlaybackKey(element);
+        return (
+            element === playerSession.audioElement
+            || Boolean(playbackKey && playbackKey === playerSession.playbackKey)
+        );
+    };
+
+    const isReadAloudAudioElement = (element) => {
+        if (!element) return false;
+
+        const source = getAudioSource(element);
+        if (source && isReadAloudResponseUrl(source)) return true;
+        if (isCurrentReadAloudSessionAudio(element)) return true;
+        if (element.srcObject) return false;
+
+        return Boolean(source && hasRecentReadAloudResponse());
+    };
+
+    const bindReadAloudSessionToAudio = (element) => {
+        if (!element || playerSession.captureState === CAPTURE_STATE.IDLE) return;
+
+        const playbackKey = getPlaybackKey(element);
+        if (!playbackKey) return;
+
+        playerSession.audioElement = element;
+        playerSession.playbackKey = playbackKey;
     };
 
     const clearPlayerDismissal = () => {
@@ -592,7 +643,7 @@
     );
 
     const getObservedAudio = () => {
-        const audioElements = getKnownAudioElements();
+        const audioElements = getKnownAudioElements().filter(isReadAloudAudioElement);
 
         if (!audioElements.length) return null;
 
@@ -602,8 +653,9 @@
                 const source = getAudioSource(element);
 
                 if (hasAudioSource(element)) score += 100;
-                if (source && /\/backend-api\/(?:synthesize|speech\/generation)(?:[/?#]|$)/.test(source)) score += 250;
+                if (source && isReadAloudResponseUrl(source)) score += 250;
                 if (element === audio) score += 20;
+                if (element === playerSession.audioElement) score += 20;
                 if (!element.paused && !element.ended) score += 1000;
                 if (Number.isFinite(element.currentTime) && element.currentTime > 0) score += 50;
                 if (Number.isFinite(element.duration) && element.duration > 0) score += 25;
@@ -958,9 +1010,11 @@
     };
 
     const closePlayer = () => {
-        const currentAudio = getObservedAudio() || audio;
+        const currentAudio = getActiveAudio();
 
-        dismissPlayerForAudio(currentAudio);
+        if (currentAudio) {
+            dismissPlayerForAudio(currentAudio);
+        }
 
         try {
             pauseAudioElement(currentAudio);
@@ -1328,15 +1382,23 @@
         }
     };
 
-    const getActiveAudio = () => getObservedAudio() || audio;
+    const getActiveAudio = () => {
+        const observedAudio = getObservedAudio();
+        if (observedAudio) return observedAudio;
+        if (isPreviewMode) return audio;
+        return isReadAloudAudioElement(audio) ? audio : null;
+    };
 
     const captureDownloadAudio = (response) => {
-        const activeAudio = getActiveAudio();
+        markReadAloudResponseSeen();
+
+        const activeAudio = getObservedAudio();
+        const sessionAudio = activeAudio && !activeAudio.paused ? activeAudio : null;
         const sessionId = playerSession.id + 1;
         playerSession = {
             ...createPlayerSession(sessionId),
-            audioElement: activeAudio,
-            playbackKey: getPlaybackKey(activeAudio),
+            audioElement: sessionAudio,
+            playbackKey: getPlaybackKey(sessionAudio),
             captureState: CAPTURE_STATE.LOADING,
             mimeType: response.headers.get('content-type')?.split(';')[0] || 'audio/aac',
             startedAt: Date.now()
@@ -1356,12 +1418,7 @@
         return `${input || ''}`;
     };
 
-    const isSpeechResponse = (url, response) => {
-        if (/\/backend-api\/(?:synthesize|speech\/generation)(?:[/?#]|$)/.test(url)) return true;
-
-        const contentType = response.headers.get('content-type') || '';
-        return /^audio\//i.test(contentType) && /\/backend-api\//.test(url);
-    };
+    const isSpeechResponse = (url) => isReadAloudResponseUrl(url);
 
     const checkObservedAudio = async () => {
         await ensureBody();
@@ -1371,6 +1428,7 @@
         audio = nextAudio;
 
         if (audio) {
+            bindReadAloudSessionToAudio(audio);
             audio.playbackRate = playbackRate;
         }
 
@@ -1447,10 +1505,14 @@
 
                 if (shouldTrack) {
                     rememberAudioElement(this);
-                    pauseOtherAudioElements(this);
-                    if (!controlsDiv && !isDismissedPlayback(this)) clearPlayerDismissal();
-                    audio = this;
-                    startMonitoring();
+                    if (isReadAloudAudioElement(this)) {
+                        pauseOtherAudioElements(this);
+                        if (!controlsDiv && !isDismissedPlayback(this)) clearPlayerDismissal();
+                        audio = this;
+                        startMonitoring();
+                    } else if (controlsDiv) {
+                        startMonitoring();
+                    }
                 }
 
                 const result = originalPlay.apply(this, args);
