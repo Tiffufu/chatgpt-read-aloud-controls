@@ -12,6 +12,7 @@ This project is not affiliated with OpenAI.
 - Play and pause controls.
 - Configurable skip-back and skip-forward intervals.
 - Seekable timeline when ChatGPT exposes a finite audio duration.
+- Stable timeline fallback from completed-capture metadata when streamed playback still reports an indefinite duration.
 - Playback speeds: `0.75x`, `1x`, `1.25x`, `1.5x`, and `2x`.
 - Current and total listening-time labels adjusted for the selected speed.
 - Conversation-aware track title with long-title truncation.
@@ -79,6 +80,7 @@ Important runtime files:
 ```text
 manifest.json             Chrome extension manifest
 src/js/content-script.js  Main-world player, audio tracking, fetch capture, and UI
+src/js/media-timeline.js  Stable native and completed-capture timeline resolution
 src/js/player-settings.js Shared settings schema, defaults, and validation
 src/js/settings-bridge.js Isolated-world storage bridge
 src/js/popup.js           Popup settings controller
@@ -118,16 +120,18 @@ Contributions should preserve the extension's runtime boundaries:
 
 Before opening a pull request:
 
-1. Run JavaScript syntax checks for every file in `src/js/`.
-2. Parse `manifest.json`.
-3. Open `preview.html` in light and dark modes.
-4. Test `ae-download=loading`, `ae-download=ready`, and `ae-download=failed` in preview mode.
-5. Load the extension unpacked in Chrome.
-6. Reload a fresh `chatgpt.com` tab.
-7. Start Read Aloud and confirm the player appears.
-8. Confirm the speed menu hover and selected states are stable.
-9. Confirm the download button stays disabled until capture completes and returns to its non-hover resting state after downloading.
-10. Confirm DevTools is not flooded with extension-origin console messages.
+1. Run `node --test tests/*.test.js`.
+2. Run JavaScript syntax checks for every file in `src/js/`.
+3. Parse `manifest.json`.
+4. Open `preview.html` in light and dark modes.
+5. Test `ae-download=loading`, `ae-download=ready`, and `ae-download=failed` in preview mode.
+6. Load the extension unpacked in Chrome.
+7. Reload a fresh `chatgpt.com` tab.
+8. Start Read Aloud and confirm the player appears.
+9. Confirm the speed menu hover and selected states are stable.
+10. Confirm the timeline stays hidden while duration is unknown, then appears with a stable total when either the active media or completed capture provides one. If only the capture provides the total, confirm the seekbar remains read-only until the active media is fully seekable.
+11. Confirm the download button stays disabled until capture completes and returns to its non-hover resting state after downloading.
+12. Confirm DevTools is not flooded with extension-origin console messages.
 
 ## Attribution
 

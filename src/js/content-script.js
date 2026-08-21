@@ -106,6 +106,26 @@
     };
 
     const playerSettingsApi = getSettingsApi();
+    const resolveMediaTimeline = typeof window.AEPlayerMediaTimeline?.resolveMediaTimeline === 'function'
+        ? window.AEPlayerMediaTimeline.resolveMediaTimeline
+        : (mediaElement, capturedDuration = 0) => {
+            const nativeDuration = Number(mediaElement?.duration);
+            const duration = Number.isFinite(nativeDuration) && nativeDuration > 0
+                ? nativeDuration
+                : Number(capturedDuration);
+            if (!Number.isFinite(duration) || duration <= 0) return null;
+            const rawCurrentTime = Number(mediaElement?.currentTime);
+            const currentTime = Number.isFinite(rawCurrentTime) ? Math.max(0, rawCurrentTime) : 0;
+            return {
+                currentTime: Math.min(currentTime, duration),
+                duration,
+                canSeek: Number.isFinite(nativeDuration) && nativeDuration > 0,
+                source: Number.isFinite(nativeDuration) && nativeDuration > 0 ? 'native' : 'captured'
+            };
+        };
+    const probeBlobDuration = typeof window.AEPlayerMediaTimeline?.probeBlobDuration === 'function'
+        ? window.AEPlayerMediaTimeline.probeBlobDuration
+        : async () => 0;
 
     const {
         DEFAULT_SETTINGS: DEFAULT_PLAYER_SETTINGS,
@@ -148,6 +168,7 @@
         captureState: CAPTURE_STATE.IDLE,
         chunks: [],
         mimeType: 'audio/aac',
+        capturedDuration: 0,
         startedAt: 0,
         completedAt: 0
     });
@@ -515,23 +536,14 @@
 
     const getEffectivePlaybackRate = () => normalizePlaybackRate(playbackRate);
 
-    const getClampedAudioTime = () => {
-        if (!audio || !Number.isFinite(audio.currentTime)) return Number.NaN;
-        const currentTime = Math.max(0, audio.currentTime);
-        if (!hasKnownDuration()) return currentTime;
-        return Math.min(currentTime, audio.duration);
-    };
+    const getAudioTimeline = () => resolveMediaTimeline(
+        audio,
+        audio && audio === playerSession.audioElement ? playerSession.capturedDuration : 0
+    );
 
     const getSpeedAdjustedTime = (seconds) => {
         if (!Number.isFinite(seconds) || seconds < 0) return Number.NaN;
         return seconds / getEffectivePlaybackRate();
-    };
-
-    const getSpeedAdjustedCurrentTime = () => getSpeedAdjustedTime(getClampedAudioTime());
-
-    const getSpeedAdjustedDuration = () => {
-        if (!hasKnownDuration()) return Number.NaN;
-        return getSpeedAdjustedTime(audio.duration);
     };
 
     const getTrackTitle = () => {
@@ -568,22 +580,6 @@
     const pauseAudioElement = (element) => {
         if (!element || element.paused || element.ended) return;
         element.pause?.();
-    };
-
-    const pauseOtherAudioElements = (activeElement) => {
-        if (!isReadAloudAudioElement(activeElement)) return;
-
-        getKnownAudioElements().forEach((element) => {
-            if (
-                element === activeElement
-                || element.paused
-                || element.ended
-                || !isReadAloudAudioElement(element)
-            ) {
-                return;
-            }
-            pauseAudioElement(element);
-        });
     };
 
     const hasAudioSource = (element = audio) => hasElementSource(element);
@@ -666,8 +662,6 @@
             })
             .sort((a, b) => b.score - a.score)[0].element;
     };
-
-    const hasKnownDuration = () => Boolean(audio && Number.isFinite(audio.duration) && audio.duration > 0);
 
     const setButtonEnabled = (button, enabled) => {
         if (!button) return;
@@ -854,15 +848,18 @@
     };
 
     const updateTimeDisplay = () => {
-        const hasDuration = hasKnownDuration();
-        const clampedCurrentTime = getClampedAudioTime();
-        const currentListeningTime = getSpeedAdjustedCurrentTime();
-        const totalListeningTime = getSpeedAdjustedDuration();
+        const timeline = getAudioTimeline();
+        const hasDuration = Boolean(timeline);
+        const clampedCurrentTime = timeline?.currentTime ?? Number.NaN;
+        const currentListeningTime = getSpeedAdjustedTime(clampedCurrentTime);
+        const totalListeningTime = getSpeedAdjustedTime(timeline?.duration);
         const rateLabel = formatRate(getEffectivePlaybackRate());
 
         if (currentTimeLabel) {
             currentTimeLabel.textContent = formatTime(currentListeningTime);
-            currentTimeLabel.title = hasDuration ? `Elapsed listening time at ${rateLabel}` : '';
+            currentTimeLabel.title = hasDuration
+                ? `Elapsed listening time at ${rateLabel}`
+                : '';
             currentTimeLabel.style.display = hasDuration ? '' : 'none';
         }
 
@@ -872,7 +869,9 @@
 
         if (durationLabel) {
             durationLabel.textContent = formatTime(totalListeningTime);
-            durationLabel.title = hasDuration ? `Total listening time at ${rateLabel}` : '';
+            durationLabel.title = hasDuration
+                ? `Total listening time at ${rateLabel}`
+                : '';
             durationLabel.style.display = hasDuration ? '' : 'none';
         }
 
@@ -881,11 +880,11 @@
         if (hasDuration) {
             if (seekStatusLabel) seekStatusLabel.style.display = 'none';
             seekBar.style.display = 'block';
-            seekBar.disabled = false;
-            seekBar.style.opacity = '1';
-            seekBar.style.cursor = 'pointer';
+            seekBar.disabled = !timeline.canSeek;
+            seekBar.style.opacity = timeline.canSeek ? '1' : '0.65';
+            seekBar.style.cursor = timeline.canSeek ? 'pointer' : 'default';
             const seekRatio = Number.isFinite(clampedCurrentTime)
-                ? Math.min(1, Math.max(0, clampedCurrentTime / audio.duration))
+                ? Math.min(1, Math.max(0, clampedCurrentTime / timeline.duration))
                 : 0;
             seekBar.value = String(Math.round(seekRatio * 1000));
             seekBar.style.setProperty('--ae-seek-progress', `${seekRatio * 100}%`);
@@ -1018,7 +1017,6 @@
 
         try {
             pauseAudioElement(currentAudio);
-            pauseOtherAudioElements(currentAudio);
         } catch (err) {
             console.error('[Read Aloud Controls for ChatGPT] Failed to pause audio while closing player', err);
         } finally {
@@ -1236,8 +1234,9 @@
         seekBar.value = '0';
         seekBar.style.cssText = 'width:100%;min-width:0;cursor:pointer;';
         seekBar.oninput = () => {
-            if (!audio || !hasKnownDuration()) return;
-            audio.currentTime = (Number(seekBar.value) / 1000) * audio.duration;
+            const timeline = getAudioTimeline();
+            if (!audio || !timeline?.canSeek) return;
+            audio.currentTime = (Number(seekBar.value) / 1000) * timeline.duration;
             updateTimeDisplay();
         };
 
@@ -1288,7 +1287,6 @@
             }
 
             if (audio.paused) {
-                pauseOtherAudioElements(audio);
                 audio.play?.().catch?.(console.error);
                 return;
             }
@@ -1346,6 +1344,18 @@
         syncPlayerUi();
     };
 
+    const resolveCapturedDuration = async (sessionId) => {
+        if (!isCurrentSession(sessionId) || playerSession.chunks.length < 1) return;
+
+        const blob = new Blob(playerSession.chunks, { type: playerSession.mimeType });
+        const duration = await probeBlobDuration(blob);
+        if (!isCurrentSession(sessionId) || !Number.isFinite(duration) || duration <= 0) return;
+
+        playerSession.capturedDuration = duration;
+        debugLog('captured duration ready', { sessionId, duration });
+        updateControlState();
+    };
+
     const collectDownloadStream = async (response, sessionId) => {
         let captureCompleted = false;
 
@@ -1369,12 +1379,16 @@
 
             if (!isCurrentSession(sessionId)) return;
 
-            setCaptureState(
-                captureCompleted && playerSession.chunks.length > 0
-                    ? CAPTURE_STATE.READY
-                    : CAPTURE_STATE.FAILED,
-                Date.now()
-            );
+            const captureState = captureCompleted && playerSession.chunks.length > 0
+                ? CAPTURE_STATE.READY
+                : CAPTURE_STATE.FAILED;
+            setCaptureState(captureState, Date.now());
+
+            if (captureState === CAPTURE_STATE.READY) {
+                resolveCapturedDuration(sessionId).catch((error) => {
+                    debugLog('captured duration unavailable', { sessionId, error: error?.message || `${error}` });
+                });
+            }
         } catch (err) {
             if (!isCurrentSession(sessionId) || err?.name === 'AbortError') return;
             setCaptureState(CAPTURE_STATE.FAILED, Date.now());
@@ -1457,7 +1471,6 @@
             return;
         }
 
-        pauseOtherAudioElements(audio);
         buildControls();
         startUiSync();
     };
@@ -1506,7 +1519,6 @@
                 if (shouldTrack) {
                     rememberAudioElement(this);
                     if (isReadAloudAudioElement(this)) {
-                        pauseOtherAudioElements(this);
                         if (!controlsDiv && !isDismissedPlayback(this)) clearPlayerDismissal();
                         audio = this;
                         startMonitoring();

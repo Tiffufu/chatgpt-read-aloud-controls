@@ -22,7 +22,7 @@ Owns the injected player runtime:
 
 - Tracks audio elements created by ChatGPT.
 - Scores known audio elements to identify the active Read Aloud stream.
-- Pauses competing audio elements when playback starts.
+- Leaves page-owned audio transitions untouched during passive tracking.
 - Captures Read Aloud responses from `fetch()` clones.
 - Stores active capture/download state in `playerSession`.
 - Enables audio download only after capture completes.
@@ -33,6 +33,7 @@ Owns the injected player runtime:
 Important helpers:
 
 - `getObservedAudio()` chooses the best active audio element.
+- `src/js/media-timeline.js` derives a stable timeline from native duration or completed-capture metadata and uses full-range seekability only to decide whether scrubbing is safe.
 - `isSpeechResponse()` decides whether a fetch response should be captured for download.
 - `createSettingsApiFallback()` is a last-resort guard for stale unpacked-extension manifests that run the player without the shared settings helper.
 - `playerSession` owns active capture state, MIME type, chunks, and playback key.

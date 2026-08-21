@@ -14,16 +14,24 @@ Do not replace the bridge with `window.postMessage`. ChatGPT also listens for gl
 
 ## Stability model
 
-The player is coupled to ChatGPT only at the adapter layer: audio element observation, active-audio scoring, and speech-response detection. UI state, settings validation, playback controls, speed-menu rendering, theme application, and download readiness should stay independent of ChatGPT-specific assumptions.
+The player is coupled to ChatGPT only at the adapter layer: audio element observation, active-audio scoring, and speech-response detection. UI state, settings validation, playback controls, speed-menu rendering, theme application, timeline resolution, and download readiness should stay independent of ChatGPT-specific assumptions.
 
 When changing the extension, prefer this hierarchy:
 
-1. Pure helpers: formatting, validation, constants, theme token selection.
+1. Pure helpers: formatting, validation, constants, theme token selection, media timeline resolution.
 2. UI helpers: semantic button rendering, menu rendering, label updates.
 3. Player session state: audio reference, capture state, chunks, MIME type, and playback key.
 4. Page adapter code: fetch wrapping, audio scoring, and element tracking.
 
 The fourth layer is the highest risk. Refactor it only for a specific defect and verify against a live ChatGPT Read Aloud session.
+
+The page owns transitions between its audio elements. Passive tracking must not pause competing elements. The extension pauses only the selected active element in response to an explicit player action such as Pause or Close.
+
+## Streaming timeline
+
+`src/js/media-timeline.js` resolves a display timeline without mutating active playback. A finite native duration is authoritative. If streamed audio still reports an indefinite duration after the intercepted response has finished downloading, a detached audio element reads the stable duration from the completed capture blob. Seekable and buffered endpoints are never treated as the total because they move as the stream loads.
+
+When the completed capture supplies the stable duration, the timeline is visible but read-only until the active media element reports a seekable range covering the complete track. The detached metadata probe may seek its private blob copy to resolve formats with indefinite initial metadata; it never touches the active playback element.
 
 
 ## Settings contract
@@ -68,12 +76,14 @@ Debug logs use the `[AE Player]` prefix and must stay low-volume. Do not add def
 
 Before shipping changes:
 
+- Run `node --test tests/*.test.js`.
 - Run `node --check` for every file in `src/js/`.
 - Parse `manifest.json`.
 - Open `preview.html` with `ae-theme=light` and `ae-theme=dark`.
 - Check preview download states with `ae-download=loading`, `ae-download=ready`, and `ae-download=failed`.
 - Load the unpacked extension and reload a fresh `chatgpt.com` tab.
 - Start Read Aloud and confirm the player appears.
+- Confirm a long streamed response keeps the timeline hidden while its duration is unknown, then shows one stable total from native or completed-capture metadata without counting backward.
 - Confirm the speed menu hover and selected states remain stable.
 - Confirm the download button remains disabled until capture completes and does not keep a hover/pressed background after downloading.
 - Confirm the console is not flooded with extension-origin messages.
