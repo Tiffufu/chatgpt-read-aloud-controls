@@ -146,6 +146,10 @@
     const probeBlobDuration = typeof mediaTimelineApi.probeBlobDuration === 'function'
         ? mediaTimelineApi.probeBlobDuration
         : async () => 0;
+    const capturedPlaybackApi = window.AEPlayerCapturedPlayback || {};
+    const createCapturedPlayback = typeof capturedPlaybackApi.createCapturedPlayback === 'function'
+        ? capturedPlaybackApi.createCapturedPlayback
+        : () => null;
 
     const getLegacyPlaybackRate = () => {
         try {
@@ -170,6 +174,13 @@
         FAILED: 'failed'
     });
 
+    const CAPTURED_PLAYBACK_STATE = Object.freeze({
+        IDLE: 'idle',
+        LOADING: 'loading',
+        READY: 'ready',
+        FAILED: 'failed'
+    });
+
     const createPlayerSession = (id = 0) => ({
         id,
         audioElement: null,
@@ -178,6 +189,10 @@
         chunks: [],
         mimeType: 'audio/aac',
         capturedDuration: 0,
+        capturedPlaybackElement: null,
+        capturedPlaybackUrl: '',
+        capturedPlaybackState: CAPTURED_PLAYBACK_STATE.IDLE,
+        capturedPlaybackRelease: null,
         startedAt: 0,
         startedPlaySequence: 0,
         completedAt: 0
@@ -189,6 +204,7 @@
     let trackTitleAtPlaybackStart = 'Read aloud';
     let trackTitlePlaybackKey = '';
     const observedAudioElements = new Set();
+    const extensionOwnedAudioElements = new WeakSet();
     const audioPlaySequences = new WeakMap();
     let audioPlaySequence = 0;
 
@@ -616,6 +632,7 @@
 
     const isReadAloudAudioElement = (element) => {
         if (!element) return false;
+        if (extensionOwnedAudioElements.has(element)) return false;
 
         const source = getAudioSource(element);
         if (source && isReadAloudResponseUrl(source)) return true;
@@ -627,6 +644,7 @@
 
     const bindReadAloudSessionToAudio = (element, playSequence = audioPlaySequences.get(element) || 0) => {
         if (!element || playerSession.captureState === CAPTURE_STATE.IDLE) return false;
+        if (extensionOwnedAudioElements.has(element)) return false;
 
         const playbackKey = getPlaybackKey(element);
         if (!playbackKey) return false;
@@ -934,10 +952,24 @@
     const updatePlayPauseLabel = () => {
         if (!playPauseBtn) return;
 
+        const currentAudio = playerSession.audioElement || audio;
+        const isPlaying = hasAudioSource(currentAudio) && !currentAudio?.paused;
+        const isCapturedOwner = currentAudio === playerSession.capturedPlaybackElement;
+        let iconName = isPlaying ? 'pause' : 'play';
+        let label = isPlaying ? 'Pause' : 'Play';
+
+        if (isPlaying && !isCapturedOwner) {
+            if (playerSession.capturedPlaybackState === CAPTURED_PLAYBACK_STATE.FAILED) {
+                label = 'Pause unavailable';
+            } else if (playerSession.capturedPlaybackState !== CAPTURED_PLAYBACK_STATE.READY) {
+                label = 'Preparing resumable playback';
+            }
+        }
+
         refreshIconButton(
             playPauseBtn,
-            hasAudioSource() && audio && !audio.paused ? 'pause' : 'play',
-            hasAudioSource() && audio && !audio.paused ? 'Pause' : 'Play'
+            iconName,
+            label
         );
     };
 
@@ -957,9 +989,14 @@
         if (currentAudio) audio = currentAudio;
         const canControlPlayback = hasAudioSource(currentAudio);
         const canSeek = Boolean(getAudioTimeline()?.canSeek);
+        const isCapturedOwner = currentAudio === playerSession.capturedPlaybackElement;
+        const canTogglePlayback = canControlPlayback && (
+            isCapturedOwner
+            || playerSession.capturedPlaybackState === CAPTURED_PLAYBACK_STATE.READY
+        );
 
         updateDownloadButtonState();
-        setButtonEnabled(playPauseBtn, canControlPlayback);
+        setButtonEnabled(playPauseBtn, canTogglePlayback);
         setButtonEnabled(backBtn, canControlPlayback && canSeek);
         setButtonEnabled(forwardBtn, canControlPlayback && canSeek);
         setButtonEnabled(speedBtn, canControlPlayback);
@@ -1052,6 +1089,7 @@
         } catch (err) {
             console.error('[Read Aloud Controls for ChatGPT] Failed to pause audio while closing player', err);
         } finally {
+            releaseCapturedPlaybackForSession(playerSession);
             teardownControls();
         }
     };
@@ -1395,16 +1433,60 @@
         syncPlayerUi();
     };
 
-    const resolveCapturedDuration = async (sessionId) => {
-        if (!isCurrentSession(sessionId) || playerSession.chunks.length < 1) return;
-
-        const blob = new Blob(playerSession.chunks, { type: playerSession.mimeType });
+    const resolveCapturedDuration = async (blob, sessionId) => {
+        if (!isCurrentSession(sessionId) || !blob) return;
         const duration = await probeBlobDuration(blob);
         if (!isCurrentSession(sessionId) || !Number.isFinite(duration) || duration <= 0) return;
 
         playerSession.capturedDuration = duration;
         debugLog('captured duration ready', { sessionId, duration });
         updateControlState();
+    };
+
+    const releaseCapturedPlaybackForSession = (session) => {
+        if (!session) return;
+        session.capturedPlaybackRelease?.();
+        session.capturedPlaybackElement = null;
+        session.capturedPlaybackUrl = '';
+        session.capturedPlaybackRelease = null;
+        session.capturedPlaybackState = CAPTURED_PLAYBACK_STATE.IDLE;
+    };
+
+    const prepareCapturedPlaybackForSession = (blob, sessionId) => {
+        if (!isCurrentSession(sessionId) || !blob) return;
+
+        const session = playerSession;
+        session.capturedPlaybackState = CAPTURED_PLAYBACK_STATE.LOADING;
+        const controller = createCapturedPlayback(blob);
+        if (!controller?.element || typeof controller.release !== 'function') {
+            session.capturedPlaybackState = CAPTURED_PLAYBACK_STATE.FAILED;
+            updateControlState();
+            return;
+        }
+
+        extensionOwnedAudioElements.add(controller.element);
+        controller.element.playbackRate = playbackRate;
+        session.capturedPlaybackElement = controller.element;
+        session.capturedPlaybackUrl = controller.objectUrl || '';
+        session.capturedPlaybackRelease = controller.release;
+        updateControlState();
+
+        Promise.resolve(controller.ready).then((isReady) => {
+            if (!isCurrentSession(sessionId) || playerSession !== session) {
+                controller.release();
+                return;
+            }
+
+            session.capturedPlaybackState = isReady
+                ? CAPTURED_PLAYBACK_STATE.READY
+                : CAPTURED_PLAYBACK_STATE.FAILED;
+            updateControlState();
+        }, () => {
+            controller.release();
+            if (!isCurrentSession(sessionId) || playerSession !== session) return;
+            session.capturedPlaybackState = CAPTURED_PLAYBACK_STATE.FAILED;
+            updateControlState();
+        });
     };
 
     const collectDownloadStream = async (response, sessionId) => {
@@ -1436,12 +1518,14 @@
             setCaptureState(captureState, Date.now());
 
             if (captureState === CAPTURE_STATE.READY) {
-                resolveCapturedDuration(sessionId).catch((error) => {
+                const blob = new Blob(playerSession.chunks, { type: playerSession.mimeType });
+                resolveCapturedDuration(blob, sessionId).catch((error) => {
                     debugLog('captured duration unavailable', {
                         sessionId,
                         error: error?.message || `${error}`
                     });
                 });
+                prepareCapturedPlaybackForSession(blob, sessionId);
             }
         } catch (err) {
             if (!isCurrentSession(sessionId) || err?.name === 'AbortError') return;
@@ -1463,6 +1547,7 @@
         markReadAloudResponseSeen();
 
         const sessionId = playerSession.id + 1;
+        releaseCapturedPlaybackForSession(playerSession);
         playerSession = {
             ...createPlayerSession(sessionId),
             captureState: CAPTURE_STATE.LOADING,

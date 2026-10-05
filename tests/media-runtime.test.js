@@ -439,6 +439,7 @@ class FakeElement {
     }
 
     click() {
+        if (this.disabled) return;
         const event = {
             type: 'click',
             target: this,
@@ -518,6 +519,7 @@ class FakeMediaElement extends FakeElement {
         this.playbackRate = 1;
         this.playCalls = 0;
         this.pauseCalls = 0;
+        this.loadCalls = 0;
         this.playImplementation = null;
     }
 
@@ -533,6 +535,10 @@ class FakeMediaElement extends FakeElement {
     pause() {
         this.pauseCalls += 1;
         this.paused = true;
+    }
+
+    load() {
+        this.loadCalls += 1;
     }
 }
 
@@ -607,12 +613,22 @@ const flushMicrotasks = async () => {
     for (let index = 0; index < 12; index += 1) await Promise.resolve();
 };
 
-const createContentScriptHarness = ({ capturedDuration = 420, now = () => Date.now() } = {}) => {
+const createContentScriptHarness = ({
+    capturedDuration = 420,
+    capturedPlaybackMode = 'ready',
+    now = () => Date.now()
+} = {}) => {
     const mediaTimeline = loadMediaTimeline();
+    const capturedPlayback = loadCapturedPlayback();
     const document = new FakeDocument();
     const intervalCallbacks = new Map();
     const windowListeners = new Map();
+    const capturedAudioElements = [];
+    const capturedPlaybackControllers = [];
+    const capturedPlaybackTimeouts = [];
+    const revokedPlaybackUrls = [];
     let nextIntervalId = 1;
+    let nextCapturedUrlId = 1;
 
     class FakeCustomEvent {
         constructor(type, options = {}) {
@@ -688,6 +704,40 @@ const createContentScriptHarness = ({ capturedDuration = 420, now = () => Date.n
         ...mediaTimeline,
         probeBlobDuration: async () => capturedDuration
     };
+    context.AEPlayerCapturedPlayback = {
+        createCapturedPlayback: (blob) => {
+            const capturedAudio = document.createElement('audio');
+            capturedAudioElements.push(capturedAudio);
+            if (capturedPlaybackMode === 'ready') {
+                capturedAudio.readyState = 1;
+                capturedAudio.duration = capturedDuration;
+                capturedAudio.seekable = createTimeRangesForHarness([[0, capturedDuration]]);
+            } else {
+                capturedAudio.readyState = 0;
+                capturedAudio.seekable = createTimeRangesForHarness([]);
+            }
+
+            const controller = capturedPlayback.createCapturedPlayback(blob, {
+                createAudio: () => capturedAudio,
+                createObjectURL: () => {
+                    const url = `blob:captured-playback-${nextCapturedUrlId}`;
+                    nextCapturedUrlId += 1;
+                    return url;
+                },
+                revokeObjectURL: (url) => revokedPlaybackUrls.push(url),
+                setTimeout: (callback) => {
+                    const timeout = { active: true, callback };
+                    capturedPlaybackTimeouts.push(timeout);
+                    return timeout;
+                },
+                clearTimeout: (timeout) => {
+                    timeout.active = false;
+                }
+            });
+            capturedPlaybackControllers.push(controller);
+            return controller;
+        }
+    };
 
     vm.runInNewContext(fs.readFileSync(contentScriptPath, 'utf8'), context, {
         filename: contentScriptPath
@@ -713,16 +763,141 @@ const createContentScriptHarness = ({ capturedDuration = 420, now = () => Date.n
         for (const callback of [...intervalCallbacks.values()]) callback();
         await flushMicrotasks();
     };
+    const makeCapturedReady = async (index = capturedAudioElements.length - 1) => {
+        const capturedAudio = capturedAudioElements[index];
+        capturedAudio.readyState = 1;
+        capturedAudio.duration = capturedDuration;
+        capturedAudio.seekable = createTimeRangesForHarness([[0, capturedDuration]]);
+        capturedAudio.dispatchEvent({ type: 'loadedmetadata' });
+        await flushMicrotasks();
+    };
+    const expireCapturedPlayback = async (index = capturedPlaybackTimeouts.length - 1) => {
+        const timeout = capturedPlaybackTimeouts[index];
+        if (timeout?.active) timeout.callback();
+        await flushMicrotasks();
+    };
 
     return {
+        capturedAudioElements,
+        capturedPlaybackControllers,
         context,
         createAudio,
+        expireCapturedPlayback,
         findButton,
         findPlayerElement,
         flushMicrotasks,
+        makeCapturedReady,
+        revokedPlaybackUrls,
         runIntervals
     };
 };
+
+test('pause stays disabled and announces preparation until captured playback is seek ready', async () => {
+    const harness = createContentScriptHarness({ capturedPlaybackMode: 'loading' });
+    await harness.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    const pageAudio = harness.createAudio('blob:page-read-aloud', {
+        currentTime: 30,
+        seekable: [[0, 90]]
+    });
+    await pageAudio.play();
+    await harness.flushMicrotasks();
+
+    const preparingButton = harness.findButton('Preparing resumable playback');
+    assert.ok(preparingButton);
+    assert.equal(preparingButton.disabled, true);
+    assert.equal(pageAudio.pauseCalls, 0);
+
+    await harness.makeCapturedReady();
+    const pauseButton = harness.findButton('Pause');
+    assert.ok(pauseButton);
+    assert.equal(pauseButton.disabled, false);
+    assert.equal(pageAudio.pauseCalls, 0);
+});
+
+test('captured preparation does not autoplay or replace the page owner', async () => {
+    const harness = createContentScriptHarness();
+    await harness.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    const pageAudio = harness.createAudio('blob:page-read-aloud', {
+        currentTime: 30,
+        seekable: [[0, 90]]
+    });
+    await pageAudio.play();
+    await harness.flushMicrotasks();
+    const capturedAudio = harness.capturedAudioElements[0];
+
+    harness.context.document.dispatchEvent(new harness.context.CustomEvent(
+        'ae-read-aloud-player:settings',
+        { detail: { settings: { playbackRate: 2 } } }
+    ));
+
+    assert.equal(capturedAudio.playCalls, 0);
+    assert.equal(pageAudio.playbackRate, 2);
+    assert.equal(capturedAudio.playbackRate, 1);
+    assert.equal(pageAudio.pauseCalls, 0);
+});
+
+test('failed preparation leaves page playback untouched and download available', async () => {
+    const harness = createContentScriptHarness({ capturedPlaybackMode: 'failed' });
+    await harness.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    const pageAudio = harness.createAudio('blob:page-read-aloud', {
+        currentTime: 30,
+        seekable: [[0, 90]]
+    });
+    await pageAudio.play();
+    await harness.flushMicrotasks();
+    await harness.expireCapturedPlayback();
+
+    const unavailableButton = harness.findButton('Pause unavailable');
+    const downloadButton = harness.findButton('Download audio');
+    assert.ok(unavailableButton);
+    assert.equal(unavailableButton.disabled, true);
+    assert.ok(downloadButton);
+    assert.equal(downloadButton.disabled, false);
+    assert.equal(pageAudio.pauseCalls, 0);
+    unavailableButton.click();
+    assert.equal(pageAudio.pauseCalls, 0);
+});
+
+test('prepared extension audio never enters page candidate ownership', async () => {
+    const harness = createContentScriptHarness();
+    await harness.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    await harness.flushMicrotasks();
+    const capturedAudio = harness.capturedAudioElements[0];
+
+    await capturedAudio.play();
+    await harness.flushMicrotasks();
+    await harness.runIntervals();
+
+    assert.equal(harness.context.document.getElementById('ae_enhanced_player'), null);
+});
+
+test('new response and close release pending preparation before late readiness', async () => {
+    const harness = createContentScriptHarness({ capturedPlaybackMode: 'loading' });
+    await harness.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    const firstPageAudio = harness.createAudio('blob:first-page-read-aloud', { seekable: [[0, 90]] });
+    await firstPageAudio.play();
+    await harness.flushMicrotasks();
+    const firstCapturedAudio = harness.capturedAudioElements[0];
+
+    await harness.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    await harness.flushMicrotasks();
+    assert.equal(firstCapturedAudio.src, '');
+    assert.equal(firstCapturedAudio.pauseCalls, 1);
+
+    const secondPageAudio = harness.createAudio('blob:second-page-read-aloud', { seekable: [[0, 90]] });
+    await secondPageAudio.play();
+    await harness.flushMicrotasks();
+    const secondCapturedAudio = harness.capturedAudioElements[1];
+    harness.findButton('Close player').click();
+
+    assert.equal(secondCapturedAudio.src, '');
+    assert.equal(secondCapturedAudio.pauseCalls, 1);
+    await harness.makeCapturedReady(0);
+    await harness.makeCapturedReady(1);
+    await harness.runIntervals();
+    assert.equal(harness.context.document.getElementById('ae_enhanced_player'), null);
+    assert.equal(harness.revokedPlaybackUrls.length, 2);
+});
 
 test('passive tracking never pauses another page-owned Read Aloud element', async () => {
     const harness = createContentScriptHarness();
