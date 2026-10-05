@@ -34,6 +34,7 @@
       "js": [
         "src/js/player-settings.js",
         "src/js/media-timeline.js",
+        "src/js/captured-playback.js",
         "src/js/content-script.js"
       ],
       "run_at": "document_start",

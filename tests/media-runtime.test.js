@@ -6,6 +6,7 @@ const vm = require('node:vm');
 
 const projectRoot = path.resolve(__dirname, '..');
 const mediaTimelinePath = path.join(projectRoot, 'src/js/media-timeline.js');
+const capturedPlaybackPath = path.join(projectRoot, 'src/js/captured-playback.js');
 const contentScriptPath = path.join(projectRoot, 'src/js/content-script.js');
 const manifestPath = path.join(projectRoot, 'manifest.json');
 
@@ -21,10 +22,168 @@ const loadMediaTimeline = () => {
     }
 };
 
+const loadCapturedPlayback = () => {
+    try {
+        delete require.cache[require.resolve(capturedPlaybackPath)];
+        return require(capturedPlaybackPath);
+    } catch (error) {
+        if (error.code === 'MODULE_NOT_FOUND' && error.message.includes(capturedPlaybackPath)) {
+            return {};
+        }
+        throw error;
+    }
+};
+
+const createDetachedAudioDouble = () => {
+    const listeners = new Map();
+    return {
+        currentTime: 0,
+        duration: Number.POSITIVE_INFINITY,
+        readyState: 0,
+        seekable: createTimeRanges([]),
+        paused: true,
+        src: '',
+        playCalls: 0,
+        pauseCalls: 0,
+        loadCalls: 0,
+        addEventListener(name, listener) {
+            if (!listeners.has(name)) listeners.set(name, new Set());
+            listeners.get(name).add(listener);
+        },
+        removeEventListener(name, listener) {
+            listeners.get(name)?.delete(listener);
+        },
+        dispatch(name) {
+            listeners.get(name)?.forEach((listener) => listener.call(this, { type: name }));
+        },
+        play() {
+            this.playCalls += 1;
+            this.paused = false;
+            return Promise.resolve();
+        },
+        pause() {
+            this.pauseCalls += 1;
+            this.paused = true;
+        },
+        load() {
+            this.loadCalls += 1;
+        },
+        removeAttribute(name) {
+            if (name === 'src') this.src = '';
+        }
+    };
+};
+
 const createTimeRanges = (ranges) => ({
     length: ranges.length,
     start: (index) => ranges[index][0],
     end: (index) => ranges[index][1]
+});
+
+test('captured playback becomes ready only after metadata and a valid seekable range', async () => {
+    const { createCapturedPlayback } = loadCapturedPlayback();
+    const audio = createDetachedAudioDouble();
+    const revokedUrls = [];
+
+    assert.equal(typeof createCapturedPlayback, 'function');
+    const controller = createCapturedPlayback({}, {
+        createAudio: () => audio,
+        createObjectURL: () => 'blob:captured-playback',
+        revokeObjectURL: (url) => revokedUrls.push(url),
+        setTimeout: () => 1,
+        clearTimeout() {}
+    });
+
+    assert.ok(controller);
+    assert.equal(audio.playCalls, 0);
+    assert.equal(audio.preload, 'auto');
+    assert.equal(audio.src, 'blob:captured-playback');
+
+    audio.readyState = 1;
+    audio.seekable = createTimeRanges([[0, 420]]);
+    audio.dispatch('loadedmetadata');
+
+    assert.equal(await controller.ready, true);
+    assert.deepEqual(revokedUrls, []);
+    assert.equal(audio.playCalls, 0);
+});
+
+test('captured playback rejects empty malformed and zero-width seekable ranges', async () => {
+    const { createCapturedPlayback } = loadCapturedPlayback();
+    const invalidRanges = [[], [[20, 10]], [[15, 15]]];
+
+    for (const ranges of invalidRanges) {
+        const audio = createDetachedAudioDouble();
+        const revokedUrls = [];
+        let expire;
+        const controller = createCapturedPlayback({}, {
+            createAudio: () => audio,
+            createObjectURL: () => `blob:invalid-${ranges.length}`,
+            revokeObjectURL: (url) => revokedUrls.push(url),
+            setTimeout: (callback) => {
+                expire = callback;
+                return 1;
+            },
+            clearTimeout() {}
+        });
+
+        audio.readyState = 1;
+        audio.seekable = createTimeRanges(ranges);
+        audio.dispatch('loadedmetadata');
+        expire();
+
+        assert.equal(await controller.ready, false);
+        assert.equal(revokedUrls.length, 1);
+        assert.equal(audio.src, '');
+    }
+});
+
+test('captured playback timeout releases its object URL exactly once', async () => {
+    const { createCapturedPlayback } = loadCapturedPlayback();
+    const audio = createDetachedAudioDouble();
+    const revokedUrls = [];
+    let expire;
+    const controller = createCapturedPlayback({}, {
+        createAudio: () => audio,
+        createObjectURL: () => 'blob:timed-out-playback',
+        revokeObjectURL: (url) => revokedUrls.push(url),
+        setTimeout: (callback) => {
+            expire = callback;
+            return 1;
+        },
+        clearTimeout() {}
+    });
+
+    expire();
+    assert.equal(await controller.ready, false);
+    controller.release();
+    controller.release();
+
+    assert.deepEqual(revokedUrls, ['blob:timed-out-playback']);
+    assert.equal(audio.pauseCalls, 1);
+    assert.equal(audio.src, '');
+});
+
+test('captured playback release before readiness makes late media events inert', async () => {
+    const { createCapturedPlayback } = loadCapturedPlayback();
+    const audio = createDetachedAudioDouble();
+    const revokedUrls = [];
+    const controller = createCapturedPlayback({}, {
+        createAudio: () => audio,
+        createObjectURL: () => 'blob:released-playback',
+        revokeObjectURL: (url) => revokedUrls.push(url),
+        setTimeout: () => 1,
+        clearTimeout() {}
+    });
+
+    controller.release();
+    audio.readyState = 1;
+    audio.seekable = createTimeRanges([[0, 420]]);
+    audio.dispatch('canplay');
+
+    assert.equal(await controller.ready, false);
+    assert.deepEqual(revokedUrls, ['blob:released-playback']);
+    assert.equal(audio.playCalls, 0);
 });
 
 test('moving media ranges never become the total duration', () => {
