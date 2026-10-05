@@ -183,6 +183,7 @@
 
     const createPlayerSession = (id = 0) => ({
         id,
+        isClosed: false,
         audioElement: null,
         playbackKey: '',
         captureState: CAPTURE_STATE.IDLE,
@@ -655,7 +656,9 @@
         if (!playbackKey) return false;
 
         const ownedAudio = playerSession.audioElement;
-        const hasValidOwner = hasElementSource(ownedAudio) && !ownedAudio.ended;
+        const hasValidOwner = hasElementSource(ownedAudio) && (
+            extensionOwnedAudioElements.has(ownedAudio) || !ownedAudio.ended
+        );
         if (hasValidOwner && element !== ownedAudio) return false;
 
         if (element !== ownedAudio && playSequence <= playerSession.startedPlaySequence) {
@@ -1083,6 +1086,7 @@
     };
 
     const closePlayer = () => {
+        playerSession.isClosed = true;
         const currentAudio = getActiveAudio();
         const isCapturedOwner = currentAudio === playerSession.capturedPlaybackElement;
 
@@ -1425,9 +1429,14 @@
     };
 
     const resolveCapturedDuration = async (blob, sessionId) => {
-        if (!isCurrentSession(sessionId) || !blob) return;
+        if (!isCurrentSession(sessionId) || playerSession.isClosed || !blob) return;
         const duration = await probeBlobDuration(blob);
-        if (!isCurrentSession(sessionId) || !Number.isFinite(duration) || duration <= 0) return;
+        if (
+            !isCurrentSession(sessionId)
+            || playerSession.isClosed
+            || !Number.isFinite(duration)
+            || duration <= 0
+        ) return;
 
         playerSession.capturedDuration = duration;
         debugLog('captured duration ready', { sessionId, duration });
@@ -1444,7 +1453,7 @@
     };
 
     const prepareCapturedPlaybackForSession = (blob, sessionId) => {
-        if (!isCurrentSession(sessionId) || !blob) return;
+        if (!isCurrentSession(sessionId) || playerSession.isClosed || !blob) return;
 
         const session = playerSession;
         session.capturedPlaybackState = CAPTURED_PLAYBACK_STATE.LOADING;
@@ -1463,7 +1472,7 @@
         updateControlState();
 
         Promise.resolve(controller.ready).then((isReady) => {
-            if (!isCurrentSession(sessionId) || playerSession !== session) {
+            if (!isCurrentSession(sessionId) || playerSession !== session || session.isClosed) {
                 controller.release();
                 return;
             }
@@ -1474,7 +1483,7 @@
             updateControlState();
         }, () => {
             controller.release();
-            if (!isCurrentSession(sessionId) || playerSession !== session) return;
+            if (!isCurrentSession(sessionId) || playerSession !== session || session.isClosed) return;
             session.capturedPlaybackState = CAPTURED_PLAYBACK_STATE.FAILED;
             updateControlState();
         });
@@ -1555,8 +1564,9 @@
         try {
             if (response.body) {
                 const reader = response.body.getReader();
-                while (isCurrentSession(sessionId)) {
+                while (isCurrentSession(sessionId) && !playerSession.isClosed) {
                     const { done, value } = await reader.read();
+                    if (!isCurrentSession(sessionId) || playerSession.isClosed) return;
                     if (done) {
                         captureCompleted = true;
                         break;
@@ -1565,12 +1575,12 @@
                 }
             } else {
                 const buffer = await response.arrayBuffer();
-                if (!isCurrentSession(sessionId)) return;
+                if (!isCurrentSession(sessionId) || playerSession.isClosed) return;
                 playerSession.chunks.push(new Uint8Array(buffer));
                 captureCompleted = true;
             }
 
-            if (!isCurrentSession(sessionId)) return;
+            if (!isCurrentSession(sessionId) || playerSession.isClosed) return;
 
             const captureState = captureCompleted && playerSession.chunks.length > 0
                 ? CAPTURE_STATE.READY
@@ -1588,7 +1598,7 @@
                 prepareCapturedPlaybackForSession(blob, sessionId);
             }
         } catch (err) {
-            if (!isCurrentSession(sessionId) || err?.name === 'AbortError') return;
+            if (!isCurrentSession(sessionId) || playerSession.isClosed || err?.name === 'AbortError') return;
             setCaptureState(CAPTURE_STATE.FAILED, Date.now());
             console.error('[Read Aloud Controls for ChatGPT] Download capture failed', err);
         }
