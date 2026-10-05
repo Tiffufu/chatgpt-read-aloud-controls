@@ -564,10 +564,15 @@
 
     const getEffectivePlaybackRate = () => normalizePlaybackRate(playbackRate);
 
-    const getAudioTimeline = () => resolveMediaTimeline(
-        audio,
-        audio && audio === playerSession.audioElement ? playerSession.capturedDuration : 0
-    );
+    const getAudioTimeline = () => {
+        const currentAudio = playerSession.audioElement || audio;
+        return resolveMediaTimeline(
+            currentAudio,
+            currentAudio && currentAudio === playerSession.audioElement
+                ? playerSession.capturedDuration
+                : 0
+        );
+    };
 
     const getSpeedAdjustedTime = (seconds) => {
         if (!Number.isFinite(seconds) || seconds < 0) return Number.NaN;
@@ -1358,22 +1363,7 @@
 
         playPauseBtn = createIconButton('play', 'Play', 40);
         playPauseBtn.onclick = () => {
-            const currentAudio = getActiveAudio();
-            if (!currentAudio) {
-                return;
-            }
-
-            audio = currentAudio;
-
-            if (!hasAudioSource()) {
-                return;
-            }
-
-            if (audio.paused) {
-                audio.play?.().catch?.(console.error);
-                return;
-            }
-            audio.pause?.();
+            void toggleSessionPlayback();
         };
 
         forwardBtn = createIconButton('forward', `Skip forward ${playerSettings.skipForwardSeconds} seconds`, 36);
@@ -1487,6 +1477,75 @@
             session.capturedPlaybackState = CAPTURED_PLAYBACK_STATE.FAILED;
             updateControlState();
         });
+    };
+
+    const handoffToCapturedPlayback = () => {
+        const pageAudio = playerSession.audioElement;
+        const capturedAudio = playerSession.capturedPlaybackElement;
+        if (
+            !pageAudio
+            || !capturedAudio
+            || pageAudio === capturedAudio
+            || playerSession.capturedPlaybackState !== CAPTURED_PLAYBACK_STATE.READY
+        ) {
+            return false;
+        }
+
+        const pagePosition = Number(pageAudio.currentTime);
+        if (!Number.isFinite(pagePosition) || pagePosition < 0) return false;
+
+        const safeTarget = resolveSeekTarget(capturedAudio, pagePosition, 'nearest');
+        if (safeTarget === null || Math.abs(safeTarget - pagePosition) > 0.05) return false;
+
+        try {
+            capturedAudio.currentTime = pagePosition;
+            if (Math.abs(Number(capturedAudio.currentTime) - pagePosition) > 0.05) return false;
+            capturedAudio.playbackRate = getEffectivePlaybackRate();
+        } catch (_error) {
+            return false;
+        }
+
+        playerSession.audioElement = capturedAudio;
+        audio = capturedAudio;
+
+        try {
+            pauseAudioElement(pageAudio);
+        } catch (_error) {
+            playerSession.audioElement = pageAudio;
+            audio = pageAudio;
+            return false;
+        }
+
+        updateControlState();
+        return true;
+    };
+
+    const toggleSessionPlayback = async () => {
+        const currentAudio = getActiveAudio();
+        if (!currentAudio || !hasAudioSource(currentAudio)) return;
+
+        audio = currentAudio;
+        if (!currentAudio.paused) {
+            if (currentAudio !== playerSession.capturedPlaybackElement) {
+                handoffToCapturedPlayback();
+                updateControlState();
+                return;
+            }
+
+            currentAudio.pause?.();
+            updateControlState();
+            return;
+        }
+
+        try {
+            await currentAudio.play?.();
+        } catch (error) {
+            debugLog('captured playback resume rejected', {
+                sessionId: playerSession.id,
+                error: error?.message || `${error}`
+            });
+        }
+        updateControlState();
     };
 
     const collectDownloadStream = async (response, sessionId) => {

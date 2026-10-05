@@ -521,6 +521,7 @@ class FakeMediaElement extends FakeElement {
         this.pauseCalls = 0;
         this.loadCalls = 0;
         this.playImplementation = null;
+        this.pauseImplementation = null;
     }
 
     play() {
@@ -534,6 +535,9 @@ class FakeMediaElement extends FakeElement {
 
     pause() {
         this.pauseCalls += 1;
+        if (typeof this.pauseImplementation === 'function') {
+            return this.pauseImplementation.call(this);
+        }
         this.paused = true;
     }
 
@@ -616,6 +620,7 @@ const flushMicrotasks = async () => {
 const createContentScriptHarness = ({
     capturedDuration = 420,
     capturedPlaybackMode = 'ready',
+    capturedSeekable = [[0, capturedDuration]],
     now = () => Date.now()
 } = {}) => {
     const mediaTimeline = loadMediaTimeline();
@@ -711,7 +716,7 @@ const createContentScriptHarness = ({
             if (capturedPlaybackMode === 'ready') {
                 capturedAudio.readyState = 1;
                 capturedAudio.duration = capturedDuration;
-                capturedAudio.seekable = createTimeRangesForHarness([[0, capturedDuration]]);
+                capturedAudio.seekable = createTimeRangesForHarness(capturedSeekable);
             } else {
                 capturedAudio.readyState = 0;
                 capturedAudio.seekable = createTimeRangesForHarness([]);
@@ -767,7 +772,7 @@ const createContentScriptHarness = ({
         const capturedAudio = capturedAudioElements[index];
         capturedAudio.readyState = 1;
         capturedAudio.duration = capturedDuration;
-        capturedAudio.seekable = createTimeRangesForHarness([[0, capturedDuration]]);
+        capturedAudio.seekable = createTimeRangesForHarness(capturedSeekable);
         capturedAudio.dispatchEvent({ type: 'loadedmetadata' });
         await flushMicrotasks();
     };
@@ -899,6 +904,201 @@ test('new response and close release pending preparation before late readiness',
     assert.equal(harness.revokedPlaybackUrls.length, 2);
 });
 
+test('first pause transfers exact position and rate before pausing the page stream', async () => {
+    const harness = createContentScriptHarness();
+    await harness.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    const pageAudio = harness.createAudio('blob:page-read-aloud', {
+        currentTime: 84,
+        seekable: [[0, 420]]
+    });
+    await pageAudio.play();
+    await harness.flushMicrotasks();
+    const capturedAudio = harness.capturedAudioElements[0];
+
+    harness.context.document.dispatchEvent(new harness.context.CustomEvent(
+        'ae-read-aloud-player:settings',
+        { detail: { settings: { playbackRate: 2 } } }
+    ));
+    let stateWhenPagePaused = null;
+    pageAudio.pauseImplementation = function () {
+        this.paused = true;
+        stateWhenPagePaused = {
+            capturedCurrentTime: capturedAudio.currentTime,
+            capturedPlaybackRate: capturedAudio.playbackRate
+        };
+    };
+
+    harness.findButton('Pause').click();
+    await harness.flushMicrotasks();
+
+    assert.deepEqual(stateWhenPagePaused, {
+        capturedCurrentTime: 84,
+        capturedPlaybackRate: 2
+    });
+    assert.equal(pageAudio.pauseCalls, 1);
+    assert.equal(capturedAudio.paused, true);
+});
+
+test('first pause rejects an unavailable exact position without pausing the page stream', async () => {
+    const harness = createContentScriptHarness({
+        capturedSeekable: [[0, 60], [120, 420]]
+    });
+    await harness.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    const pageAudio = harness.createAudio('blob:page-read-aloud', {
+        currentTime: 90,
+        seekable: [[0, 420]]
+    });
+    await pageAudio.play();
+    await harness.flushMicrotasks();
+
+    harness.findButton('Pause').click();
+    await harness.flushMicrotasks();
+
+    assert.equal(pageAudio.pauseCalls, 0);
+    assert.equal(pageAudio.paused, false);
+    assert.equal(harness.capturedAudioElements[0].currentTime, 0);
+    assert.ok(harness.findButton('Pause'));
+});
+
+test('pause after the loaded timeline stays nonzero and Play resumes from that position on first pause', async () => {
+    const harness = createContentScriptHarness({ capturedDuration: 420 });
+    await harness.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    const pageAudio = harness.createAudio('blob:page-read-aloud', {
+        currentTime: 84,
+        seekable: [[0, 420]]
+    });
+    await pageAudio.play();
+    await harness.flushMicrotasks();
+    const capturedAudio = harness.capturedAudioElements[0];
+    const seekBar = harness.findPlayerElement((element) => element.tagName === 'INPUT' && element.type === 'range');
+
+    harness.findButton('Pause').click();
+    await harness.flushMicrotasks();
+    await harness.runIntervals();
+
+    const playButton = harness.findButton('Play');
+    assert.equal(capturedAudio.currentTime, 84);
+    assert.equal(seekBar.disabled, false);
+    assert.equal(seekBar.value, '200');
+    assert.ok(playButton);
+    assert.equal(playButton.disabled, false);
+    assert.equal(harness.findButton('Skip back 15 seconds').disabled, false);
+    assert.equal(harness.findButton('Skip forward 15 seconds').disabled, false);
+    assert.equal(pageAudio.pauseCalls, 1);
+
+    playButton.click();
+    await harness.flushMicrotasks();
+    await harness.runIntervals();
+
+    assert.equal(capturedAudio.playCalls, 1);
+    assert.equal(capturedAudio.currentTime, 84);
+    assert.equal(seekBar.value, '200');
+    assert.ok(harness.findButton('Pause'));
+});
+
+test('scrub pause settle and resume keep seek and skip enabled at the accepted position', async () => {
+    const harness = createContentScriptHarness({ capturedDuration: 420 });
+    await harness.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    const pageAudio = harness.createAudio('blob:page-read-aloud', {
+        currentTime: 60,
+        seekable: [[0, 420]]
+    });
+    await pageAudio.play();
+    await harness.flushMicrotasks();
+    const capturedAudio = harness.capturedAudioElements[0];
+    const seekBar = harness.findPlayerElement((element) => element.tagName === 'INPUT' && element.type === 'range');
+
+    seekBar.value = '500';
+    seekBar.oninput();
+    assert.equal(pageAudio.currentTime, 210);
+    harness.findButton('Pause').click();
+    await harness.flushMicrotasks();
+    await harness.runIntervals();
+
+    assert.equal(capturedAudio.currentTime, 210);
+    assert.equal(seekBar.value, '500');
+    assert.equal(seekBar.disabled, false);
+    assert.equal(harness.findButton('Skip back 15 seconds').disabled, false);
+    assert.equal(harness.findButton('Skip forward 15 seconds').disabled, false);
+
+    harness.findButton('Play').click();
+    await harness.flushMicrotasks();
+    await harness.runIntervals();
+    assert.equal(capturedAudio.currentTime, 210);
+    assert.equal(seekBar.value, '500');
+    assert.equal(seekBar.disabled, false);
+});
+
+test('resume seek repeated skips and speed changes target only the captured owner', async () => {
+    const harness = createContentScriptHarness({ capturedDuration: 420 });
+    await harness.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    const pageAudio = harness.createAudio('blob:page-read-aloud', {
+        currentTime: 100,
+        seekable: [[0, 420]]
+    });
+    await pageAudio.play();
+    await harness.flushMicrotasks();
+    const capturedAudio = harness.capturedAudioElements[0];
+    harness.findButton('Pause').click();
+    await harness.flushMicrotasks();
+
+    harness.findButton('Skip back 15 seconds').click();
+    assert.equal(capturedAudio.currentTime, 85);
+    harness.findButton('Skip forward 15 seconds').click();
+    assert.equal(capturedAudio.currentTime, 100);
+    const seekBar = harness.findPlayerElement((element) => element.tagName === 'INPUT' && element.type === 'range');
+    seekBar.value = '500';
+    seekBar.oninput();
+    assert.equal(capturedAudio.currentTime, 210);
+
+    harness.context.document.dispatchEvent(new harness.context.CustomEvent(
+        'ae-read-aloud-player:settings',
+        { detail: { settings: { playbackRate: 1.5 } } }
+    ));
+    const elapsed = harness.findPlayerElement((element) => element.title === 'Elapsed listening time at 1.5x');
+    const total = harness.findPlayerElement((element) => element.title === 'Total listening time at 1.5x');
+    assert.equal(capturedAudio.playbackRate, 1.5);
+    assert.equal(pageAudio.playbackRate, 1);
+    assert.equal(elapsed?.textContent, '2:20');
+    assert.equal(total?.textContent, '4:40');
+    assert.equal(seekBar.value, '500');
+
+    harness.findButton('Play').click();
+    await harness.flushMicrotasks();
+    assert.equal(capturedAudio.playCalls, 1);
+    assert.equal(pageAudio.playCalls, 1);
+});
+
+test('captured play rejection leaves Play visible while seek and skip stay enabled', async () => {
+    const harness = createContentScriptHarness({ capturedDuration: 420 });
+    await harness.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    const pageAudio = harness.createAudio('blob:page-read-aloud', {
+        currentTime: 84,
+        seekable: [[0, 420]]
+    });
+    await pageAudio.play();
+    await harness.flushMicrotasks();
+    const capturedAudio = harness.capturedAudioElements[0];
+    harness.findButton('Pause').click();
+    await harness.flushMicrotasks();
+    capturedAudio.playImplementation = function () {
+        this.paused = true;
+        return Promise.reject(new Error('captured play rejected'));
+    };
+
+    harness.findButton('Play').click();
+    await harness.flushMicrotasks();
+    await harness.runIntervals();
+
+    assert.equal(capturedAudio.paused, true);
+    assert.ok(harness.findButton('Play'));
+    assert.equal(harness.findButton('Skip back 15 seconds').disabled, false);
+    assert.equal(harness.findButton('Skip forward 15 seconds').disabled, false);
+    const seekBar = harness.findPlayerElement((element) => element.tagName === 'INPUT' && element.type === 'range');
+    assert.equal(seekBar.disabled, false);
+    assert.equal(seekBar.value, '200');
+});
+
 test('passive tracking never pauses another page-owned Read Aloud element', async () => {
     const harness = createContentScriptHarness();
     await harness.context.fetch('https://chatgpt.com/backend-api/synthesize');
@@ -922,6 +1122,7 @@ test('pause and resume keep targeting the session-owned audio element', async ()
     });
     await ownedAudio.play();
     await harness.flushMicrotasks();
+    const capturedAudio = harness.capturedAudioElements[0];
 
     const staleAudio = harness.createAudio('blob:stale-candidate', {
         currentTime: 30,
@@ -943,7 +1144,8 @@ test('pause and resume keep targeting the session-owned audio element', async ()
     await harness.flushMicrotasks();
     await harness.runIntervals();
 
-    assert.equal(ownedAudio.playCalls, 2);
+    assert.equal(ownedAudio.playCalls, 1);
+    assert.equal(capturedAudio.playCalls, 1);
     assert.equal(staleAudio.playCalls, 0);
     assert.equal(playPauseButton.getAttribute('aria-label'), 'Pause');
 });
@@ -957,6 +1159,7 @@ test('a newly played competitor cannot replace a valid paused session owner', as
     });
     await ownedAudio.play();
     await harness.flushMicrotasks();
+    const capturedAudio = harness.capturedAudioElements[0];
 
     const playPauseButton = harness.findButton('Pause');
     playPauseButton.click();
@@ -978,16 +1181,18 @@ test('a newly played competitor cannot replace a valid paused session owner', as
         'ae-read-aloud-player:settings',
         { detail: { settings: { playbackRate: 2 } } }
     ));
-    assert.equal(ownedAudio.playbackRate, 2);
+    assert.equal(ownedAudio.playbackRate, 1);
+    assert.equal(capturedAudio.playbackRate, 2);
     assert.equal(competitorAudio.playbackRate, 1);
 
     playPauseButton.click();
     await harness.flushMicrotasks();
-    assert.equal(ownedAudio.playCalls, 2);
+    assert.equal(ownedAudio.playCalls, 1);
+    assert.equal(capturedAudio.playCalls, 1);
     assert.equal(competitorAudio.playCalls, 1);
 
     harness.findButton('Close player').click();
-    assert.equal(ownedAudio.pauseCalls, 2);
+    assert.equal(ownedAudio.pauseCalls, 1);
     assert.equal(competitorAudio.pauseCalls, 0);
     assert.equal(harness.context.document.getElementById('ae_enhanced_player'), null);
 });
