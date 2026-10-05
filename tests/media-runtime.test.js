@@ -1,0 +1,812 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+const vm = require('node:vm');
+
+const projectRoot = path.resolve(__dirname, '..');
+const mediaTimelinePath = path.join(projectRoot, 'src/js/media-timeline.js');
+const contentScriptPath = path.join(projectRoot, 'src/js/content-script.js');
+const manifestPath = path.join(projectRoot, 'manifest.json');
+
+const loadMediaTimeline = () => {
+    try {
+        delete require.cache[require.resolve(mediaTimelinePath)];
+        return require(mediaTimelinePath);
+    } catch (error) {
+        if (error.code === 'MODULE_NOT_FOUND' && error.message.includes(mediaTimelinePath)) {
+            return {};
+        }
+        throw error;
+    }
+};
+
+const createTimeRanges = (ranges) => ({
+    length: ranges.length,
+    start: (index) => ranges[index][0],
+    end: (index) => ranges[index][1]
+});
+
+test('moving media ranges never become the total duration', () => {
+    const { resolveMediaTimeline } = loadMediaTimeline();
+
+    assert.equal(typeof resolveMediaTimeline, 'function');
+    assert.equal(resolveMediaTimeline({
+        currentTime: 75,
+        duration: Number.POSITIVE_INFINITY,
+        seekable: createTimeRanges([[0, 240]]),
+        buffered: createTimeRanges([[0, 180]])
+    }), null);
+});
+
+test('manifest loads the timeline API before the main player runtime', () => {
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    const mainWorldScripts = manifest.content_scripts.find(({ world }) => world === 'MAIN')?.js || [];
+    const timelineIndex = mainWorldScripts.indexOf('src/js/media-timeline.js');
+    const contentScriptIndex = mainWorldScripts.indexOf('src/js/content-script.js');
+
+    assert.notEqual(timelineIndex, -1);
+    assert.notEqual(contentScriptIndex, -1);
+    assert.ok(timelineIndex < contentScriptIndex);
+});
+
+test('finite native duration is authoritative and keeps partial seek ranges', () => {
+    const { resolveMediaTimeline } = loadMediaTimeline();
+
+    assert.deepEqual(resolveMediaTimeline({
+        currentTime: 75,
+        duration: 420,
+        seekable: createTimeRanges([[0, 120], [180, 240]])
+    }, 600), {
+        currentTime: 75,
+        duration: 420,
+        source: 'native',
+        seekableRanges: [
+            { start: 0, end: 120 },
+            { start: 180, end: 240 }
+        ],
+        canSeek: true
+    });
+});
+
+test('completed capture supplies a stable total before native duration is finite', () => {
+    const { resolveMediaTimeline } = loadMediaTimeline();
+
+    assert.deepEqual(resolveMediaTimeline({
+        currentTime: 45,
+        duration: Number.POSITIVE_INFINITY,
+        seekable: createTimeRanges([[0, 120]])
+    }, 420), {
+        currentTime: 45,
+        duration: 420,
+        source: 'captured',
+        seekableRanges: [{ start: 0, end: 120 }],
+        canSeek: true
+    });
+});
+
+test('timeline remains visible but non-seekable when no range is available', () => {
+    const { resolveMediaTimeline } = loadMediaTimeline();
+
+    assert.deepEqual(resolveMediaTimeline({
+        currentTime: 15,
+        duration: Number.POSITIVE_INFINITY,
+        seekable: createTimeRanges([])
+    }, 420), {
+        currentTime: 15,
+        duration: 420,
+        source: 'captured',
+        seekableRanges: [],
+        canSeek: false
+    });
+});
+
+test('seek target stays exact inside a loaded range', () => {
+    const { resolveSeekTarget } = loadMediaTimeline();
+    const media = { seekable: createTimeRanges([[0, 120], [180, 240]]) };
+
+    assert.equal(resolveSeekTarget(media, 90, 'forward'), 90);
+    assert.equal(resolveSeekTarget(media, 210, 'backward'), 210);
+});
+
+test('seek target clamps safely across gaps and unloaded tails', () => {
+    const { resolveSeekTarget } = loadMediaTimeline();
+    const media = { seekable: createTimeRanges([[0, 120], [180, 240]]) };
+
+    assert.equal(resolveSeekTarget(media, 150, 'backward'), 120);
+    assert.equal(resolveSeekTarget(media, 150, 'forward'), 180);
+    assert.equal(resolveSeekTarget(media, 300, 'forward'), 240);
+    assert.equal(resolveSeekTarget(media, -15, 'backward'), 0);
+});
+
+test('seek target is unavailable without a valid seekable range', () => {
+    const { resolveSeekTarget } = loadMediaTimeline();
+
+    assert.equal(resolveSeekTarget({ seekable: createTimeRanges([]) }, 30, 'forward'), null);
+    assert.equal(resolveSeekTarget({ seekable: createTimeRanges([[20, 10]]) }, 15, 'forward'), null);
+});
+
+test('completed blob metadata returns an exact duration and releases its URL', async () => {
+    const { probeBlobDuration } = loadMediaTimeline();
+    const listeners = new Map();
+    const audio = {
+        duration: Number.NaN,
+        addEventListener: (name, listener) => listeners.set(name, listener),
+        removeEventListener: (name) => listeners.delete(name),
+        removeAttribute() {},
+        load() {
+            this.duration = 420;
+            listeners.get('loadedmetadata')?.({ type: 'loadedmetadata' });
+        }
+    };
+    const revokedUrls = [];
+
+    assert.equal(typeof probeBlobDuration, 'function');
+    assert.equal(await probeBlobDuration({}, {
+        createAudio: () => audio,
+        createObjectURL: () => 'blob:captured-audio',
+        revokeObjectURL: (url) => revokedUrls.push(url),
+        setTimeout: () => 1,
+        clearTimeout() {}
+    }), 420);
+    assert.deepEqual(revokedUrls, ['blob:captured-audio']);
+});
+
+test('indefinite completed blob metadata is resolved only on a detached probe', async () => {
+    const { probeBlobDuration } = loadMediaTimeline();
+    const listeners = new Map();
+    let probeCurrentTime = 0;
+    const audio = {
+        duration: Number.POSITIVE_INFINITY,
+        readyState: 1,
+        addEventListener: (name, listener) => listeners.set(name, listener),
+        removeEventListener: (name) => listeners.delete(name),
+        removeAttribute() {},
+        load() {
+            listeners.get('loadedmetadata')?.({ type: 'loadedmetadata' });
+        }
+    };
+    Object.defineProperty(audio, 'currentTime', {
+        get: () => probeCurrentTime,
+        set: (value) => {
+            probeCurrentTime = value;
+            audio.duration = 420;
+            listeners.get('durationchange')?.({ type: 'durationchange' });
+        }
+    });
+
+    assert.equal(await probeBlobDuration({}, {
+        createAudio: () => audio,
+        createObjectURL: () => 'blob:indefinite-captured-audio',
+        revokeObjectURL() {},
+        setTimeout: () => 1,
+        clearTimeout() {}
+    }), 420);
+    assert.equal(probeCurrentTime, Number.MAX_SAFE_INTEGER);
+});
+
+const createStyle = () => ({
+    cssText: '',
+    setProperty(name, value) {
+        this[name] = value;
+    }
+});
+
+class FakeElement {
+    constructor(tagName, ownerDocument) {
+        this.tagName = `${tagName || ''}`.toUpperCase();
+        this.ownerDocument = ownerDocument;
+        this.children = [];
+        this.parentNode = null;
+        this.attributes = new Map();
+        this.listeners = new Map();
+        this.dataset = {};
+        this.style = createStyle();
+        this.disabled = false;
+        this.id = '';
+        this.className = '';
+        this.title = '';
+        this.type = '';
+        this.value = '';
+        this.min = '';
+        this.max = '';
+        this._textContent = '';
+        this._innerHTML = '';
+    }
+
+    set textContent(value) {
+        this._textContent = `${value ?? ''}`;
+    }
+
+    get textContent() {
+        return `${this._textContent}${this.children.map((child) => child.textContent || '').join('')}`;
+    }
+
+    set innerHTML(value) {
+        this._innerHTML = `${value ?? ''}`;
+    }
+
+    get innerHTML() {
+        return this._innerHTML;
+    }
+
+    get innerText() {
+        return this.textContent;
+    }
+
+    append(...children) {
+        children.forEach((child) => this.appendChild(child));
+    }
+
+    appendChild(child) {
+        if (!child) return child;
+        child.parentNode = this;
+        this.children.push(child);
+        return child;
+    }
+
+    remove() {
+        if (!this.parentNode) return;
+        this.parentNode.children = this.parentNode.children.filter((child) => child !== this);
+        this.parentNode = null;
+    }
+
+    setAttribute(name, value) {
+        this.attributes.set(name, `${value}`);
+    }
+
+    getAttribute(name) {
+        return this.attributes.get(name) ?? null;
+    }
+
+    removeAttribute(name) {
+        this.attributes.delete(name);
+        if (name === 'src') this.src = '';
+    }
+
+    addEventListener(name, listener) {
+        if (!this.listeners.has(name)) this.listeners.set(name, new Set());
+        this.listeners.get(name).add(listener);
+    }
+
+    removeEventListener(name, listener) {
+        this.listeners.get(name)?.delete(listener);
+    }
+
+    dispatchEvent(event) {
+        event.target ||= this;
+        this.listeners.get(event.type)?.forEach((listener) => listener.call(this, event));
+        return true;
+    }
+
+    click() {
+        const event = {
+            type: 'click',
+            target: this,
+            preventDefault() {},
+            stopPropagation() {}
+        };
+        this.onclick?.(event);
+        this.dispatchEvent(event);
+    }
+
+    contains(target) {
+        return target === this || this.children.some((child) => child.contains?.(target));
+    }
+
+    closest(selector) {
+        if (selector === 'button' && this.tagName === 'BUTTON') return this;
+        return this.parentNode?.closest?.(selector) || null;
+    }
+
+    getBoundingClientRect() {
+        return { left: 0, top: 0, width: 560, height: 120 };
+    }
+
+    get offsetWidth() {
+        return 560;
+    }
+
+    get offsetHeight() {
+        return 120;
+    }
+
+    matches(selector) {
+        if (selector === 'audio') return this.tagName === 'AUDIO';
+        if (selector === 'button') return this.tagName === 'BUTTON';
+        if (selector === 'button[data-rate]') return this.tagName === 'BUTTON' && this.dataset.rate !== undefined;
+        if (selector === 'button[data-hover-token]') {
+            return this.tagName === 'BUTTON' && this.dataset.hoverToken !== undefined;
+        }
+        if (selector === 'input[type="range"]') return this.tagName === 'INPUT' && this.type === 'range';
+        return false;
+    }
+
+    querySelectorAll(selector) {
+        const matches = [];
+        const visit = (element) => {
+            element.children.forEach((child) => {
+                if (child.matches?.(selector)) matches.push(child);
+                visit(child);
+            });
+        };
+        visit(this);
+        return matches;
+    }
+
+    querySelector(selector) {
+        if (selector === 'svg') return null;
+        return this.querySelectorAll(selector)[0] || null;
+    }
+}
+
+const createTimeRangesForHarness = (ranges) => createTimeRanges(ranges);
+
+class FakeMediaElement extends FakeElement {
+    constructor(tagName, ownerDocument) {
+        super(tagName, ownerDocument);
+        this.currentSrc = '';
+        this.src = '';
+        this.srcObject = null;
+        this.currentTime = 0;
+        this.duration = Number.POSITIVE_INFINITY;
+        this.seekable = createTimeRangesForHarness([]);
+        this.buffered = createTimeRangesForHarness([]);
+        this.readyState = 1;
+        this.networkState = 1;
+        this.paused = true;
+        this.ended = false;
+        this.playbackRate = 1;
+        this.playCalls = 0;
+        this.pauseCalls = 0;
+        this.playImplementation = null;
+    }
+
+    play() {
+        this.playCalls += 1;
+        if (typeof this.playImplementation === 'function') {
+            return this.playImplementation.call(this);
+        }
+        this.paused = false;
+        return Promise.resolve();
+    }
+
+    pause() {
+        this.pauseCalls += 1;
+        this.paused = true;
+    }
+}
+
+class FakeAudioElement extends FakeMediaElement {
+    constructor(ownerDocument) {
+        super('audio', ownerDocument);
+    }
+}
+
+class FakeDocument {
+    constructor() {
+        this.listeners = new Map();
+        this._audioElements = [];
+        this.documentElement = new FakeElement('html', this);
+        this.head = new FakeElement('head', this);
+        this.body = new FakeElement('body', this);
+        this.documentElement.append(this.head, this.body);
+        this.title = 'Test conversation - ChatGPT';
+        this.visibilityState = 'visible';
+    }
+
+    createElement(tagName) {
+        const element = `${tagName}`.toLowerCase() === 'audio'
+            ? new FakeAudioElement(this)
+            : new FakeElement(tagName, this);
+        if (element instanceof FakeAudioElement) this._audioElements.push(element);
+        return element;
+    }
+
+    getElementById(id) {
+        const visit = (element) => {
+            if (element.id === id) return element;
+            for (const child of element.children) {
+                const match = visit(child);
+                if (match) return match;
+            }
+            return null;
+        };
+        return visit(this.documentElement);
+    }
+
+    querySelectorAll(selector) {
+        if (selector === 'audio') return [...this._audioElements];
+        return this.documentElement.querySelectorAll(selector);
+    }
+
+    addEventListener(name, listener) {
+        if (!this.listeners.has(name)) this.listeners.set(name, new Set());
+        this.listeners.get(name).add(listener);
+    }
+
+    removeEventListener(name, listener) {
+        this.listeners.get(name)?.delete(listener);
+    }
+
+    dispatchEvent(event) {
+        this.listeners.get(event.type)?.forEach((listener) => listener.call(this, event));
+        return true;
+    }
+}
+
+const findElement = (root, predicate) => {
+    if (predicate(root)) return root;
+    for (const child of root.children || []) {
+        const match = findElement(child, predicate);
+        if (match) return match;
+    }
+    return null;
+};
+
+const flushMicrotasks = async () => {
+    for (let index = 0; index < 12; index += 1) await Promise.resolve();
+};
+
+const createContentScriptHarness = ({ capturedDuration = 420, now = () => Date.now() } = {}) => {
+    const mediaTimeline = loadMediaTimeline();
+    const document = new FakeDocument();
+    const intervalCallbacks = new Map();
+    const windowListeners = new Map();
+    let nextIntervalId = 1;
+
+    class FakeCustomEvent {
+        constructor(type, options = {}) {
+            this.type = type;
+            this.detail = options.detail;
+        }
+    }
+
+    const settings = Object.freeze({
+        skipBackSeconds: 15,
+        skipForwardSeconds: 15,
+        playbackRate: 1,
+        theme: 'system'
+    });
+    const createResponse = () => ({
+        body: null,
+        headers: { get: () => 'audio/aac' },
+        arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
+        clone: () => createResponse()
+    });
+    const context = {
+        Blob,
+        CustomEvent: FakeCustomEvent,
+        Date: { now },
+        Document: FakeDocument,
+        HTMLAudioElement: FakeAudioElement,
+        HTMLMediaElement: FakeMediaElement,
+        Request: class Request {},
+        TextEncoder,
+        URL,
+        URLSearchParams,
+        clearInterval: (id) => intervalCallbacks.delete(id),
+        clearTimeout,
+        console,
+        document,
+        fetch: async () => createResponse(),
+        innerHeight: 900,
+        innerWidth: 1440,
+        localStorage: {
+            getItem: () => null,
+            removeItem() {}
+        },
+        location: { href: 'https://chatgpt.com/c/test' },
+        matchMedia: () => ({
+            matches: false,
+            addEventListener() {}
+        }),
+        setInterval: (callback) => {
+            const id = nextIntervalId;
+            nextIntervalId += 1;
+            intervalCallbacks.set(id, callback);
+            return id;
+        },
+        setTimeout,
+        addEventListener: (name, listener) => {
+            if (!windowListeners.has(name)) windowListeners.set(name, new Set());
+            windowListeners.get(name).add(listener);
+        }
+    };
+    context.window = context;
+    context.globalThis = context;
+    context.AEPlayerSettings = {
+        DEFAULT_SETTINGS: settings,
+        LEGACY_PLAYBACK_RATE_STORAGE_KEY: 'ae_playbackRate',
+        PLAYBACK_RATE_OPTIONS: [0.75, 1, 1.25, 1.5, 2],
+        isSupportedPlaybackRate: (value) => [0.75, 1, 1.25, 1.5, 2].includes(Number(value)),
+        normalizePlaybackRate: (value, fallback = 1) => (
+            [0.75, 1, 1.25, 1.5, 2].includes(Number(value)) ? Number(value) : fallback
+        ),
+        normalizeSettings: (value = {}) => ({ ...settings, ...value })
+    };
+    context.AEPlayerMediaTimeline = {
+        ...mediaTimeline,
+        probeBlobDuration: async () => capturedDuration
+    };
+
+    vm.runInNewContext(fs.readFileSync(contentScriptPath, 'utf8'), context, {
+        filename: contentScriptPath
+    });
+
+    const createAudio = (source, options = {}) => {
+        const element = document.createElement('audio');
+        element.src = source;
+        element.currentSrc = source;
+        element.currentTime = options.currentTime ?? 0;
+        element.duration = options.duration ?? Number.POSITIVE_INFINITY;
+        element.seekable = createTimeRangesForHarness(options.seekable || []);
+        return element;
+    };
+    const findPlayerElement = (predicate) => {
+        const player = document.getElementById('ae_enhanced_player');
+        return player ? findElement(player, predicate) : null;
+    };
+    const findButton = (label) => findPlayerElement((element) => (
+        element.tagName === 'BUTTON' && element.getAttribute('aria-label') === label
+    ));
+    const runIntervals = async () => {
+        for (const callback of [...intervalCallbacks.values()]) callback();
+        await flushMicrotasks();
+    };
+
+    return {
+        context,
+        createAudio,
+        findButton,
+        findPlayerElement,
+        flushMicrotasks,
+        runIntervals
+    };
+};
+
+test('passive tracking never pauses another page-owned Read Aloud element', async () => {
+    const harness = createContentScriptHarness();
+    await harness.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    const firstAudio = harness.createAudio('blob:first-read-aloud');
+    const secondAudio = harness.createAudio('blob:second-read-aloud');
+
+    await firstAudio.play();
+    await secondAudio.play();
+    await harness.flushMicrotasks();
+
+    assert.equal(firstAudio.pauseCalls, 0);
+    assert.equal(secondAudio.pauseCalls, 0);
+});
+
+test('pause and resume keep targeting the session-owned audio element', async () => {
+    const harness = createContentScriptHarness();
+    await harness.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    const ownedAudio = harness.createAudio('blob:owned-read-aloud', {
+        currentTime: 90,
+        seekable: [[0, 180]]
+    });
+    await ownedAudio.play();
+    await harness.flushMicrotasks();
+
+    const staleAudio = harness.createAudio('blob:stale-candidate', {
+        currentTime: 30,
+        seekable: [[0, 180]]
+    });
+    staleAudio.paused = false;
+
+    const playPauseButton = harness.findButton('Pause');
+    assert.ok(playPauseButton);
+    playPauseButton.click();
+    await harness.flushMicrotasks();
+    await harness.runIntervals();
+
+    assert.equal(ownedAudio.pauseCalls, 1);
+    assert.equal(staleAudio.pauseCalls, 0);
+    assert.equal(playPauseButton.getAttribute('aria-label'), 'Play');
+
+    playPauseButton.click();
+    await harness.flushMicrotasks();
+    await harness.runIntervals();
+
+    assert.equal(ownedAudio.playCalls, 2);
+    assert.equal(staleAudio.playCalls, 0);
+    assert.equal(playPauseButton.getAttribute('aria-label'), 'Pause');
+});
+
+test('a newly played competitor cannot replace a valid paused session owner', async () => {
+    const harness = createContentScriptHarness();
+    await harness.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    const ownedAudio = harness.createAudio('blob:owned-read-aloud', {
+        currentTime: 90,
+        seekable: [[0, 180]]
+    });
+    await ownedAudio.play();
+    await harness.flushMicrotasks();
+
+    const playPauseButton = harness.findButton('Pause');
+    playPauseButton.click();
+    await harness.flushMicrotasks();
+
+    const competitorAudio = harness.createAudio('blob:competing-read-aloud', {
+        currentTime: 15,
+        seekable: [[0, 180]]
+    });
+    await competitorAudio.play();
+    await harness.flushMicrotasks();
+    await harness.runIntervals();
+
+    assert.equal(playPauseButton.getAttribute('aria-label'), 'Play');
+    assert.equal(ownedAudio.pauseCalls, 1);
+    assert.equal(competitorAudio.pauseCalls, 0);
+
+    harness.context.document.dispatchEvent(new harness.context.CustomEvent(
+        'ae-read-aloud-player:settings',
+        { detail: { settings: { playbackRate: 2 } } }
+    ));
+    assert.equal(ownedAudio.playbackRate, 2);
+    assert.equal(competitorAudio.playbackRate, 1);
+
+    playPauseButton.click();
+    await harness.flushMicrotasks();
+    assert.equal(ownedAudio.playCalls, 2);
+    assert.equal(competitorAudio.playCalls, 1);
+
+    harness.findButton('Close player').click();
+    assert.equal(ownedAudio.pauseCalls, 2);
+    assert.equal(competitorAudio.pauseCalls, 0);
+    assert.equal(harness.context.document.getElementById('ae_enhanced_player'), null);
+});
+
+test('a rejected play attempt never becomes the session owner', async () => {
+    const harness = createContentScriptHarness();
+    await harness.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    const rejectedAudio = harness.createAudio('blob:rejected-read-aloud', {
+        seekable: [[0, 180]]
+    });
+    rejectedAudio.playImplementation = function () {
+        this.paused = true;
+        return Promise.reject(new Error('playback rejected'));
+    };
+
+    await assert.rejects(rejectedAudio.play(), /playback rejected/);
+    await harness.flushMicrotasks();
+    await harness.runIntervals();
+
+    assert.equal(harness.context.document.getElementById('ae_enhanced_player'), null);
+
+    const playableAudio = harness.createAudio('blob:playable-read-aloud', {
+        seekable: [[0, 180]]
+    });
+    await playableAudio.play();
+    await harness.flushMicrotasks();
+
+    harness.findButton('Pause').click();
+    assert.equal(rejectedAudio.pauseCalls, 0);
+    assert.equal(playableAudio.pauseCalls, 1);
+});
+
+test('a pre-session play that resolves later cannot claim the new response', async () => {
+    const harness = createContentScriptHarness();
+    let resolvePendingPlay;
+    const earlierAudio = harness.createAudio('blob:earlier-read-aloud', {
+        seekable: [[0, 180]]
+    });
+    earlierAudio.playImplementation = function () {
+        return new Promise((resolve) => {
+            resolvePendingPlay = () => {
+                this.paused = false;
+                resolve();
+            };
+        });
+    };
+
+    const earlierPlay = earlierAudio.play();
+    await harness.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    resolvePendingPlay();
+    await earlierPlay;
+    await harness.flushMicrotasks();
+    await harness.runIntervals();
+
+    assert.equal(harness.context.document.getElementById('ae_enhanced_player'), null);
+
+    const newAudio = harness.createAudio('blob:new-read-aloud', {
+        seekable: [[0, 180]]
+    });
+    await newAudio.play();
+    await harness.flushMicrotasks();
+
+    harness.findButton('Pause').click();
+    assert.equal(earlierAudio.pauseCalls, 0);
+    assert.equal(newAudio.pauseCalls, 1);
+});
+
+test('skip controls use the owned element and clamp to loaded seekable ranges', async () => {
+    const harness = createContentScriptHarness();
+    await harness.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    const ownedAudio = harness.createAudio('blob:owned-read-aloud', {
+        currentTime: 180,
+        seekable: [[0, 120], [180, 240]]
+    });
+    await ownedAudio.play();
+    await harness.flushMicrotasks();
+
+    harness.findButton('Skip back 15 seconds').click();
+    assert.equal(ownedAudio.currentTime, 120);
+
+    ownedAudio.currentTime = 115;
+    harness.findButton('Skip forward 15 seconds').click();
+    assert.equal(ownedAudio.currentTime, 180);
+});
+
+test('captured duration enables partial seeking and speed-adjusted labels without moving position', async () => {
+    const harness = createContentScriptHarness({ capturedDuration: 420 });
+    await harness.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    const ownedAudio = harness.createAudio('blob:owned-read-aloud', {
+        currentTime: 60,
+        seekable: [[0, 120], [180, 240]]
+    });
+    await ownedAudio.play();
+    await harness.flushMicrotasks();
+
+    const seekBar = harness.findPlayerElement((element) => element.tagName === 'INPUT' && element.type === 'range');
+    assert.ok(seekBar);
+    assert.equal(seekBar.style.display, 'block');
+    assert.equal(seekBar.disabled, false);
+    assert.equal(seekBar.value, '143');
+
+    harness.context.document.dispatchEvent(new harness.context.CustomEvent(
+        'ae-read-aloud-player:settings',
+        { detail: { settings: { playbackRate: 2 } } }
+    ));
+
+    const elapsed = harness.findPlayerElement((element) => element.title === 'Elapsed listening time at 2x');
+    const total = harness.findPlayerElement((element) => element.title === 'Total listening time at 2x');
+    assert.equal(elapsed?.textContent, '0:30');
+    assert.equal(total?.textContent, '3:30');
+    assert.equal(ownedAudio.currentTime, 60);
+    assert.equal(seekBar.value, '143');
+
+    seekBar.value = '500';
+    seekBar.oninput();
+    assert.equal(ownedAudio.currentTime, 210);
+
+    seekBar.value = '800';
+    seekBar.oninput();
+    assert.equal(ownedAudio.currentTime, 240);
+    assert.equal(seekBar.value, '571');
+});
+
+test('a new speech response transfers controls only after its next audio element plays', async () => {
+    const harness = createContentScriptHarness();
+    await harness.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    const firstAudio = harness.createAudio('blob:first-read-aloud', { seekable: [[0, 120]] });
+    await firstAudio.play();
+    await harness.flushMicrotasks();
+
+    await harness.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    const secondAudio = harness.createAudio('blob:second-read-aloud', { seekable: [[0, 120]] });
+    await secondAudio.play();
+    await harness.flushMicrotasks();
+
+    harness.findButton('Pause').click();
+    await harness.flushMicrotasks();
+
+    assert.equal(firstAudio.pauseCalls, 0);
+    assert.equal(secondAudio.pauseCalls, 1);
+});
+
+test('a same-millisecond response cannot reclaim audio that played before the session', async () => {
+    const harness = createContentScriptHarness({ now: () => 1000 });
+    await harness.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    const firstAudio = harness.createAudio('blob:first-read-aloud', { seekable: [[0, 120]] });
+    await firstAudio.play();
+    await harness.flushMicrotasks();
+
+    await harness.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    await harness.flushMicrotasks();
+    await harness.runIntervals();
+
+    assert.equal(harness.context.document.getElementById('ae_enhanced_player'), null);
+    assert.equal(firstAudio.pauseCalls, 0);
+});

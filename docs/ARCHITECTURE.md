@@ -14,16 +14,26 @@ Do not replace the bridge with `window.postMessage`. ChatGPT also listens for gl
 
 ## Stability model
 
-The player is coupled to ChatGPT only at the adapter layer: audio element observation, active-audio scoring, and speech-response detection. UI state, settings validation, playback controls, speed-menu rendering, theme application, and download readiness should stay independent of ChatGPT-specific assumptions.
+The player is coupled to ChatGPT only at the adapter layer: audio element observation, session binding, and speech-response detection. UI state, settings validation, playback controls, speed-menu rendering, theme application, timeline resolution, and download readiness should stay independent of ChatGPT-specific assumptions.
 
 When changing the extension, prefer this hierarchy:
 
-1. Pure helpers: formatting, validation, constants, theme token selection.
+1. Pure helpers: formatting, validation, constants, theme token selection, and media timeline resolution.
 2. UI helpers: semantic button rendering, menu rendering, label updates.
 3. Player session state: audio reference, capture state, chunks, MIME type, and playback key.
 4. Page adapter code: fetch wrapping, audio scoring, and element tracking.
 
 The fourth layer is the highest risk. Refactor it only for a specific defect and verify against a live ChatGPT Read Aloud session.
+
+The page owns transitions between its audio elements. Passive tracking must not pause competing elements. The extension pauses only the session-owned element in response to an explicit Pause or Close action.
+
+## Streaming timeline
+
+`src/js/media-timeline.js` resolves a display timeline without mutating active playback. A finite native duration is authoritative. When streamed audio continues to report an indefinite duration, a detached audio element reads stable metadata from the completed capture blob. Moving `seekable` and `buffered` endpoints are never treated as the total duration.
+
+The stable total may describe more audio than ChatGPT currently exposes as seekable. The full timeline remains visible, but seek and skip targets are constrained to the live seekable ranges. Targets in gaps or unloaded tails snap to a safe boundary instead of interrupting playback.
+
+Elapsed and total listening-time labels are divided by the selected playback rate. Seekbar progress remains based on raw media time, so changing speed does not change playback position.
 
 
 ## Settings contract
@@ -44,6 +54,8 @@ Stored settings in `chrome.storage.local` still take precedence over defaults, s
 - capture state: `idle`, `loading`, `ready`, or `failed`
 - captured chunks
 - MIME type
+- stable captured duration, when available
+- the play-sequence marker used to reject pre-session audio
 - capture timestamps
 
 The download button reads from this session. It is visible but disabled until capture reaches `ready` with at least one chunk. This prevents partial downloads without hiding the affordance. The resting appearance is derived from semantic button state rather than hover, focus, or pressed styles. Starting a download keeps the download icon in place because Chrome's own download UI provides action feedback.
@@ -68,13 +80,17 @@ Debug logs use the `[AE Player]` prefix and must stay low-volume. Do not add def
 
 Before shipping changes:
 
+- Run `node --test tests/*.test.js`.
 - Run `node --check` for every file in `src/js/`.
 - Parse `manifest.json`.
 - Open `preview.html` with `ae-theme=light` and `ae-theme=dark`.
 - Check preview download states with `ae-download=loading`, `ae-download=ready`, and `ae-download=failed`.
 - Load the unpacked extension and reload a fresh `chatgpt.com` tab.
 - Start Read Aloud and confirm the player appears.
+- Confirm a long streamed response gains a stable total before playback completes and seeks only within loaded ranges.
+- Confirm pause/resume and repeated skip actions retain the session-owned track.
+- Confirm every supported speed updates both listening-time labels without changing seekbar progress.
 - Confirm the speed menu hover and selected states remain stable.
 - Confirm the download button remains disabled until capture completes and does not keep a hover/pressed background after downloading.
-- Confirm the console is not flooded with extension-origin messages.
+- Confirm the console is not flooded with extension-origin messages or interrupted-play errors.
 - Confirm any main-world fallback defaults still match `src/js/player-settings.js`.
