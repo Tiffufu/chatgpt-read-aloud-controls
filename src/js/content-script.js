@@ -1084,13 +1084,14 @@
 
     const closePlayer = () => {
         const currentAudio = getActiveAudio();
+        const isCapturedOwner = currentAudio === playerSession.capturedPlaybackElement;
 
         if (currentAudio) {
             dismissPlayerForAudio(currentAudio);
         }
 
         try {
-            pauseAudioElement(currentAudio);
+            if (!isCapturedOwner) pauseAudioElement(currentAudio);
         } catch (err) {
             console.error('[Read Aloud Controls for ChatGPT] Failed to pause audio while closing player', err);
         } finally {

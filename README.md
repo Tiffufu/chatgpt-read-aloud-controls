@@ -10,6 +10,7 @@ This project is not affiliated with OpenAI.
 
 - Floating player that appears when ChatGPT Read Aloud starts.
 - Play and pause controls.
+- Resumable first-Pause handoff to an extension-owned copy after capture is seek-ready.
 - Configurable skip-back and skip-forward intervals.
 - Stable timeline from native metadata or completed-capture metadata when ChatGPT streams an indefinite duration.
 - Safe seeking and skip controls limited to the ranges ChatGPT has made seekable.
@@ -33,6 +34,8 @@ This project is not affiliated with OpenAI.
 7. Start ChatGPT Read Aloud.
 
 The player appears automatically after ChatGPT starts a Read Aloud audio stream.
+
+Pause is briefly unavailable while the extension prepares a seekable copy of the captured response. Once ready, the first Pause preserves the current position by transferring control to that copy before stopping ChatGPT's fragile page stream. The floating player then remains authoritative for Play, Pause, seek, skip, and speed; ChatGPT's native Read Aloud button may appear idle after this handoff.
 
 ## Popup settings
 
@@ -81,6 +84,7 @@ Important runtime files:
 manifest.json             Chrome extension manifest
 src/js/content-script.js  Main-world player, audio tracking, fetch capture, and UI
 src/js/media-timeline.js  Stable duration, seek-range, and metadata-probe helpers
+src/js/captured-playback.js Detached captured-player readiness and cleanup lifecycle
 src/js/player-settings.js Shared settings schema, defaults, and validation
 src/js/settings-bridge.js Isolated-world storage bridge
 src/js/popup.js           Popup settings controller
@@ -131,11 +135,14 @@ Use Node.js 18 or newer for the runtime tests (the harness relies on the built-i
 7. Reload a fresh `chatgpt.com` tab.
 8. Start Read Aloud and confirm the player appears.
 9. Confirm a streamed response gains a stable timeline after capture completes, with seeks clamped to loaded ranges.
-10. Confirm pause/resume and repeated skip actions retain the same track.
-11. Confirm speed changes update both time labels without changing the seekbar position.
-12. Confirm the speed menu hover and selected states are stable.
-13. Confirm the download button stays disabled until capture completes and returns to its non-hover resting state after downloading.
-14. Confirm DevTools is not flooded with extension-origin messages or interrupted-play errors.
+10. Let the timeline advance to a nonzero position, Pause without scrubbing, wait for UI sync, and confirm the bar and both skip buttons remain enabled at that position.
+11. Resume and confirm playback advances from the preserved position rather than restarting or becoming inert.
+12. Scrub to another loaded position and repeat Pause/Resume and both skip actions.
+13. Confirm speed changes update both time labels without changing the seekbar position.
+14. Start another Read Aloud response and confirm the previous captured player stops without pausing unrelated page audio.
+15. Confirm the speed menu hover and selected states are stable.
+16. Confirm the download button stays disabled until capture completes and returns to its non-hover resting state after downloading.
+17. Confirm DevTools is not flooded with extension-origin messages or interrupted-play errors.
 
 ## Attribution
 

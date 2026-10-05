@@ -6,7 +6,7 @@ Read Aloud Controls for ChatGPT is a Manifest V3 extension with a popup settings
 
 ### `manifest.json`
 
-Registers extension metadata, popup, icons, the isolated settings bridge, the shared main-world settings and timeline helpers, and the ChatGPT player script. The player script runs at `document_start` in the page's main world so it can observe page-created audio elements and wrap `window.fetch`. The bridge runs in the default isolated world so it can access extension APIs.
+Registers extension metadata, popup, icons, the isolated settings bridge, the shared main-world settings, timeline, and captured-playback helpers, and the ChatGPT player script. The player script runs at `document_start` in the page's main world so it can observe page-created audio elements and wrap `window.fetch`. The bridge runs in the default isolated world so it can access extension APIs.
 
 ### `src/js/player-settings.js`
 
@@ -20,13 +20,19 @@ Reads `chrome.storage.local`, listens for popup updates, accepts scoped player-o
 
 Resolves a stable display duration from finite native metadata or completed-capture metadata, normalizes the live seekable ranges, clamps seek targets to those ranges, and probes a detached completed blob when streamed media reports an indefinite duration. It never mutates the active playback element.
 
+### `src/js/captured-playback.js`
+
+Creates the detached blob-backed playback controller used for resumable Pause. It resolves readiness only after metadata and a valid seekable range exist, never calls `play()`, and owns idempotent pause, unload, timeout, and object-URL revocation cleanup.
+
 ### `src/js/content-script.js`
 
 Owns the injected player runtime:
 
 - Tracks audio elements created by ChatGPT.
 - Binds each speech-response session to an audio element that played after the session began.
-- Retains that owned element through pause, resume, speed, seek, and skip actions.
+- Prepares a captured playback element without replacing or autoplaying the page stream.
+- Atomically transfers ownership to the captured element on the first safe Pause.
+- Retains the captured owner through pause, resume, speed, seek, and skip actions.
 - Leaves page-owned audio transitions untouched during passive tracking.
 - Captures Read Aloud responses from `fetch()` clones.
 - Stores active capture/download state in `playerSession`.
@@ -39,11 +45,12 @@ Important helpers:
 
 - `getObservedAudio()` discovers eligible post-session playback candidates when no owned element exists.
 - `src/js/media-timeline.js` derives the stable timeline and safe seek targets.
+- `src/js/captured-playback.js` owns captured media readiness and object-URL cleanup.
 - `isSpeechResponse()` decides whether a fetch response should be captured for download.
 - `createSettingsApiFallback()` is a last-resort guard for stale unpacked-extension manifests that run the player without the shared settings helper.
-- `playerSession` owns the active audio element, capture state, MIME type, chunks, captured duration, and playback key.
+- `playerSession` owns the authoritative audio element, capture state, MIME type, chunks, captured duration, playback key, and captured-player lifecycle fields.
 - `updateDownloadButtonState()` derives the download affordance from the current session.
-- `closePlayer()` marks the active playback dismissed, pauses tracked audio, and tears down the UI.
+- `closePlayer()` marks the active playback dismissed, pauses the current owner once, releases captured media, and tears down the UI.
 - `buildControls()` constructs the floating player UI.
 - `updateControlState()` refreshes enabled/disabled state, speed labels, play/pause icon, download readiness state, and time labels.
 - `initializePreviewMode()` renders the same UI in `preview.html` without a ChatGPT stream.

@@ -18,14 +18,14 @@ The player is coupled to ChatGPT only at the adapter layer: audio element observ
 
 When changing the extension, prefer this hierarchy:
 
-1. Pure helpers: formatting, validation, constants, theme token selection, and media timeline resolution.
+1. Pure and lifecycle helpers: formatting, validation, constants, theme token selection, media timeline resolution, and captured-player preparation.
 2. UI helpers: semantic button rendering, menu rendering, label updates.
 3. Player session state: audio reference, capture state, chunks, MIME type, and playback key.
 4. Page adapter code: fetch wrapping, audio scoring, and element tracking.
 
 The fourth layer is the highest risk. Refactor it only for a specific defect and verify against a live ChatGPT Read Aloud session.
 
-The page owns transitions between its audio elements. Passive tracking must not pause competing elements. The extension pauses only the session-owned element in response to an explicit Pause or Close action.
+The page owns transitions between its audio elements before handoff. Passive tracking must not pause competing elements. The extension pauses only the session-owned element in response to an explicit Pause or Close action, and extension-owned captured elements are excluded from page-candidate discovery.
 
 ## Streaming timeline
 
@@ -34,6 +34,16 @@ The page owns transitions between its audio elements. Passive tracking must not 
 The stable total may describe more audio than ChatGPT currently exposes as seekable. The full timeline remains visible, but seek and skip targets are constrained to the live seekable ranges. Targets in gaps or unloaded tails snap to a safe boundary instead of interrupting playback.
 
 Elapsed and total listening-time labels are divided by the selected playback rate. Seekbar progress remains based on raw media time, so changing speed does not change playback position.
+
+## Captured playback handoff
+
+`src/js/captured-playback.js` prepares a separate detached audio element from the completed capture blob. It never starts playback: readiness requires metadata plus at least one nonempty seekable range, and failure or a 5-second timeout unloads the element and revokes its object URL.
+
+Until that element is ready, the Play/Pause button is disabled and announces `Preparing resumable playback`. Preparation failure leaves ChatGPT playback untouched and reports `Pause unavailable`; a completed capture may still be downloaded.
+
+On the first enabled Pause, `content-script.js` verifies that the captured element can accept the page stream's exact raw position. It applies the selected rate and makes the captured element `playerSession.audioElement` before pausing the page stream. If exact positioning fails, ownership and page playback remain unchanged. After a successful handoff, Play, Pause, seek, skip, speed, timeline state, and Close use only the captured owner. Its seekbar and skip buttons remain enabled while paused whenever it has a valid seekable range. ChatGPT's native Read Aloud indicator is not expected to stay synchronized after handoff.
+
+Close and response replacement release the captured element and revoke its URL. A new response pauses a previous extension-owned captured player but never passively pauses page-owned competitors. Late readiness from a released controller cannot modify the current session or rebuild a closed player.
 
 
 ## Settings contract
@@ -55,6 +65,7 @@ Stored settings in `chrome.storage.local` still take precedence over defaults, s
 - captured chunks
 - MIME type
 - stable captured duration, when available
+- prepared captured playback element, object URL, lifecycle state, and release callback
 - the play-sequence marker used to reject pre-session audio
 - capture timestamps
 
@@ -88,7 +99,9 @@ Before shipping changes:
 - Load the unpacked extension and reload a fresh `chatgpt.com` tab.
 - Start Read Aloud and confirm the player appears.
 - Confirm a long streamed response gains a stable total before playback completes and seeks only within loaded ranges.
-- Confirm pause/resume and repeated skip actions retain the session-owned track.
+- In the Chrome test profile, let a loaded timeline reach a nonzero position, Pause, wait for UI sync, and confirm the bar and both skip buttons remain enabled at that position.
+- Resume and confirm playback continues from the preserved position; then repeat after scrubbing and exercise both skip buttons.
+- Start another Read Aloud response and confirm the prior captured player stops without pausing page competitors.
 - Confirm every supported speed updates both listening-time labels without changing seekbar progress.
 - Confirm the speed menu hover and selected states remain stable.
 - Confirm the download button remains disabled until capture completes and does not keep a hover/pressed background after downloading.

@@ -1099,6 +1099,81 @@ test('captured play rejection leaves Play visible while seek and skip stay enabl
     assert.equal(seekBar.value, '200');
 });
 
+test('close pauses the captured owner unloads it and revokes its URL once', async () => {
+    const harness = createContentScriptHarness();
+    await harness.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    const pageAudio = harness.createAudio('blob:page-read-aloud', {
+        currentTime: 84,
+        seekable: [[0, 420]]
+    });
+    await pageAudio.play();
+    await harness.flushMicrotasks();
+    const capturedAudio = harness.capturedAudioElements[0];
+
+    harness.findButton('Pause').click();
+    await harness.flushMicrotasks();
+    harness.findButton('Play').click();
+    await harness.flushMicrotasks();
+    harness.findButton('Close player').click();
+
+    assert.equal(capturedAudio.pauseCalls, 1);
+    assert.equal(capturedAudio.src, '');
+    assert.deepEqual(harness.revokedPlaybackUrls, ['blob:captured-playback-1']);
+    assert.equal(pageAudio.pauseCalls, 1);
+    assert.equal(harness.context.document.getElementById('ae_enhanced_player'), null);
+});
+
+test('second speech response releases the old captured owner without pausing page competitors', async () => {
+    const harness = createContentScriptHarness();
+    await harness.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    const pageAudio = harness.createAudio('blob:first-page-read-aloud', {
+        currentTime: 84,
+        seekable: [[0, 420]]
+    });
+    await pageAudio.play();
+    await harness.flushMicrotasks();
+    const capturedAudio = harness.capturedAudioElements[0];
+    harness.findButton('Pause').click();
+    await harness.flushMicrotasks();
+    harness.findButton('Play').click();
+    await harness.flushMicrotasks();
+
+    const competitorAudio = harness.createAudio('blob:page-competitor', { seekable: [[0, 420]] });
+    await competitorAudio.play();
+    await harness.flushMicrotasks();
+    await harness.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    await harness.flushMicrotasks();
+
+    assert.equal(capturedAudio.pauseCalls, 1);
+    assert.equal(capturedAudio.src, '');
+    assert.equal(competitorAudio.pauseCalls, 0);
+    assert.equal(pageAudio.pauseCalls, 1);
+    assert.equal(harness.revokedPlaybackUrls[0], 'blob:captured-playback-1');
+});
+
+test('late captured readiness cannot reopen a closed player or mutate a replacement session', async () => {
+    const harness = createContentScriptHarness({ capturedPlaybackMode: 'loading' });
+    await harness.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    const firstPageAudio = harness.createAudio('blob:first-page-read-aloud', { seekable: [[0, 420]] });
+    await firstPageAudio.play();
+    await harness.flushMicrotasks();
+
+    await harness.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    await harness.flushMicrotasks();
+    const secondPageAudio = harness.createAudio('blob:second-page-read-aloud', { seekable: [[0, 420]] });
+    await secondPageAudio.play();
+    await harness.flushMicrotasks();
+    await harness.makeCapturedReady(0);
+
+    assert.ok(harness.findButton('Preparing resumable playback'));
+    harness.findButton('Close player').click();
+    await harness.makeCapturedReady(1);
+    await harness.runIntervals();
+
+    assert.equal(harness.context.document.getElementById('ae_enhanced_player'), null);
+    assert.equal(harness.revokedPlaybackUrls.length, 2);
+});
+
 test('passive tracking never pauses another page-owned Read Aloud element', async () => {
     const harness = createContentScriptHarness();
     await harness.context.fetch('https://chatgpt.com/backend-api/synthesize');
