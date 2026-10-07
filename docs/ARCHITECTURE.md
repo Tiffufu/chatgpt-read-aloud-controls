@@ -45,6 +45,8 @@ On the first enabled Pause, `content-script.js` verifies that the captured eleme
 
 Close and response replacement release the captured element and revoke its URL. A new response pauses a previous extension-owned captured player but never passively pauses page-owned competitors. Late readiness from a released controller cannot modify the current session or rebuild a closed player.
 
+Closing marks the current session closed before teardown. Pending response reads, duration probes, and captured-player readiness callbacks check that state before allocating media or changing the UI. A captured owner also remains authoritative after its `ended` flag is set; passive page discovery cannot replace it. Ownership changes only through explicit close or a new speech-response session.
+
 
 ## Settings contract
 
@@ -59,6 +61,7 @@ Stored settings in `chrome.storage.local` still take precedence over defaults, s
 `content-script.js` keeps download/capture state in a single `playerSession` object rather than loose globals. The session records:
 
 - session id
+- closed-session guard used to invalidate pending asynchronous capture work
 - active audio element reference
 - playback key
 - capture state: `idle`, `loading`, `ready`, or `failed`
@@ -107,3 +110,5 @@ Before shipping changes:
 - Confirm the download button remains disabled until capture completes and does not keep a hover/pressed background after downloading.
 - Confirm the console is not flooded with extension-origin messages or interrupted-play errors.
 - Confirm any main-world fallback defaults still match `src/js/player-settings.js`.
+
+The most recent completed live run is recorded in [`LIVE_VALIDATION_2026-10-07.md`](LIVE_VALIDATION_2026-10-07.md).

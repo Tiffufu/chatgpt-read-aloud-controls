@@ -37,6 +37,8 @@ The player appears automatically after ChatGPT starts a Read Aloud audio stream.
 
 Pause is briefly unavailable while the extension prepares a seekable copy of the captured response. Once ready, the first Pause preserves the current position by transferring control to that copy before stopping ChatGPT's fragile page stream. The floating player then remains authoritative for Play, Pause, seek, skip, and speed; ChatGPT's native Read Aloud button may appear idle after this handoff.
 
+The captured-playback repair was live-validated in the Chrome test profile and confirmed again after reloading the final build on October 7, 2026. See [`docs/LIVE_VALIDATION_2026-10-07.md`](docs/LIVE_VALIDATION_2026-10-07.md) for the exercised controls, automated checks, and remaining preview-only limitation.
+
 ## Popup settings
 
 Open the extension icon to configure player settings:
@@ -57,6 +59,8 @@ The downloaded file is built from the audio response captured while ChatGPT is s
 ## Local preview
 
 Open `preview.html` directly in a browser to check the injected player UI without loading ChatGPT.
+
+The preview exercises layout, theme, time labels, speed, and download states. It does not simulate completion of the detached captured-player readiness lifecycle, so its Play/Pause control can remain in `Preparing resumable playback`. Use a live ChatGPT Read Aloud response for pause/resume validation.
 
 Useful query parameters:
 

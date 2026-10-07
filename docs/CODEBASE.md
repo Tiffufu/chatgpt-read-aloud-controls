@@ -33,6 +33,7 @@ Owns the injected player runtime:
 - Prepares a captured playback element without replacing or autoplaying the page stream.
 - Atomically transfers ownership to the captured element on the first safe Pause.
 - Retains the captured owner through pause, resume, speed, seek, and skip actions.
+- Retains an ended captured owner until explicit Close or the next speech-response session.
 - Leaves page-owned audio transitions untouched during passive tracking.
 - Captures Read Aloud responses from `fetch()` clones.
 - Stores active capture/download state in `playerSession`.
@@ -48,9 +49,9 @@ Important helpers:
 - `src/js/captured-playback.js` owns captured media readiness and object-URL cleanup.
 - `isSpeechResponse()` decides whether a fetch response should be captured for download.
 - `createSettingsApiFallback()` is a last-resort guard for stale unpacked-extension manifests that run the player without the shared settings helper.
-- `playerSession` owns the authoritative audio element, capture state, MIME type, chunks, captured duration, playback key, and captured-player lifecycle fields.
+- `playerSession` owns the authoritative audio element, capture state, MIME type, chunks, captured duration, playback key, closed-session guard, and captured-player lifecycle fields.
 - `updateDownloadButtonState()` derives the download affordance from the current session.
-- `closePlayer()` marks the active playback dismissed, pauses the current owner once, releases captured media, and tears down the UI.
+- `closePlayer()` invalidates pending capture work, marks the active playback dismissed, pauses the current owner once, releases captured media, and tears down the UI.
 - `buildControls()` constructs the floating player UI.
 - `updateControlState()` refreshes enabled/disabled state, speed labels, play/pause icon, download readiness state, and time labels.
 - `initializePreviewMode()` renders the same UI in `preview.html` without a ChatGPT stream.
