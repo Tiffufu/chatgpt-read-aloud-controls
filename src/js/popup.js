@@ -25,6 +25,7 @@
     const skipForwardInput = document.getElementById('skipForwardSeconds');
     const playbackRateSelect = document.getElementById('playbackRate');
     const themeSelect = document.getElementById('theme');
+    const autoReadCheckbox = document.getElementById('autoReadAloud');
     const status = document.getElementById('status');
 
     if (!settingsApi) {
@@ -76,13 +77,15 @@
         skipForwardInput.value = settings.skipForwardSeconds;
         playbackRateSelect.value = String(settings.playbackRate);
         themeSelect.value = settings.theme;
+        autoReadCheckbox.checked = settings.autoReadAloud;
     };
 
     const readForm = () => normalizeSettings({
         skipBackSeconds: skipBackInput.value,
         skipForwardSeconds: skipForwardInput.value,
         playbackRate: playbackRateSelect.value,
-        theme: themeSelect.value
+        theme: themeSelect.value,
+        autoReadAloud: autoReadCheckbox.checked
     });
 
     const persist = async () => {
@@ -123,6 +126,20 @@
 
         playbackRateSelect.addEventListener('change', persist);
         themeSelect.addEventListener('change', persist);
+        autoReadCheckbox.addEventListener('change', persist);
+
+        // The error belongs to the current tab, rather than the global preference.
+        if (chromeApi?.tabs?.query && chromeApi?.tabs?.sendMessage) {
+            try {
+                const [tab] = await chromeApi.tabs.query({ active: true, currentWindow: true });
+                if (tab?.id !== undefined) {
+                    const result = await chromeApi.tabs.sendMessage(tab.id, { type: 'AE_AUTO_READ_STATUS' });
+                    if (result?.error) status.textContent = result.error;
+                }
+            } catch (_err) {
+                // The active tab may not be ChatGPT, or may need refreshing.
+            }
+        }
     };
 
     initialize();

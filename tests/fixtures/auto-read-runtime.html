@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Auto Read Aloud runtime tests</title>
+<style>body{font:16px system-ui;max-width:900px;margin:40px auto;background:#fafaf8;color:#222}li{margin:12px 0}.fail{color:#b42318}.pass{color:#067647}iframe{display:none}</style>
+<h1>Auto Read Aloud runtime tests</h1><p id="summary">Running…</p><ol id="results"></ol>
+<script>window.module={exports:{}};document.write('<script src="../../src/js/auto-read-aloud.js?test='+Date.now()+'"><\/script>');</script>
+<script>
+(async()=>{
+ const {install}=module.exports;
+ const results=[];
+ const assert=(value,message)=>{if(!value)throw new Error(message);};
+ const settle=()=>new Promise(resolve=>setTimeout(resolve,0));
+ async function check(name,fn){try{await fn();results.push({name,pass:true});}catch(e){results.push({name,pass:false,error:e.message});}}
+ function sharedStorage(enabled=false){
+  const listeners=[];let settings={autoReadAloud:enabled};
+  return {
+   local:{get:async()=>({ae_player_settings:settings})},
+   onChanged:{addListener:fn=>listeners.push(fn)},
+   set(value){settings={autoReadAloud:value};listeners.forEach(fn=>fn({ae_player_settings:{newValue:settings}},'local'));}
+  };
+ }
+ function turn(id,answer,state='complete',read=true){return `<div data-turn-key="${id}"><div data-talvt-turn-state="${state}"><div><h4 data-conversation-role="user">You said:</h4><button aria-label="Edit message"></button></div><div><h4 data-conversation-role="assistant">ChatGPT said:</h4><div data-dil-message-id="message-${id}">${answer}</div>${read?'<button aria-label="Read aloud" aria-pressed="false"></button>':''}</div></div></div>`;}
+ async function tab(storage,{history='',href='https://chatgpt.com/c/test'}={}){
+  const frame=document.createElement('iframe');document.body.append(frame);
+  const doc=frame.contentDocument;doc.body.innerHTML=`<main><div aria-label="Conversation">${history}</div><div id="prompt-textarea" contenteditable="true" role="textbox"></div><button aria-label="Send"></button></main>`;
+  const clicks=[];const intents=[];const cancelled=[];const timers=new Map();let nextTimer=0;let listener;let session=0;
+  const publish=(state,extra={})=>doc.dispatchEvent(new CustomEvent('ae-read-aloud-player:playback',{detail:{sessionId:session,state,...extra}}));
+  doc.addEventListener('ae-read-aloud-player:playback-intent',e=>intents.push(e.detail));
+  doc.addEventListener('ae-read-aloud-player:playback-cancel',e=>cancelled.push(e.detail.requestId));
+  doc.addEventListener('click',e=>{
+   if(e.target.matches('button[aria-label="Read aloud"]')){
+    const intent=intents.at(-1);clicks.push(e.target.closest('[data-turn-key]').getAttribute('data-turn-key'));session++;
+    publish('playing',intent);
+   }
+  });
+  const location={href};
+  install({document:doc,chrome:{storage,runtime:{onMessage:{addListener:fn=>listener=fn}}},location,
+   CustomEvent,MutationObserver,queueMicrotask:fn=>queueMicrotask(fn),setTimeout(fn){const id=++nextTimer;timers.set(id,fn);return id;},clearTimeout:id=>timers.delete(id),
+   setInterval(){},addEventListener(){}});
+  await settle();
+  return {
+   doc,clicks,cancelled,publish,location,
+   async send(id,answer='A new answer',read=true){
+    doc.getElementById('prompt-textarea').textContent='Test submission '+id;
+    doc.querySelector('button[aria-label="Send"]').click();
+    doc.querySelector('[aria-label="Conversation"]').insertAdjacentHTML('beforeend',turn(id,answer,'complete',read));await settle();
+   },
+   async history(id){doc.querySelector('[aria-label="Conversation"]').innerHTML=turn(id,'Historical answer');doc.dispatchEvent(new Event('visibilitychange'));await settle();},
+   status(){let response;listener({type:'AE_AUTO_READ_STATUS'},{},value=>response=value);return response;},
+   expire(){for(const fn of [...timers.values()])fn();}
+  };
+ }
+ await check('Hydrating and focusing historical conversations stays silent while enabled',async()=>{
+  const t=await tab(sharedStorage(true));await t.history('loaded-history');await t.history('another-history');assert(t.clicks.length===0,'historical content started');
+ });
+ await check('A new fast response starts native Read Aloud once without a manual read click',async()=>{
+  const t=await tab(sharedStorage(true),{history:turn('old','Old answer')});await t.send('new');assert(t.clicks.join(',')==='new','new response did not start');t.doc.dispatchEvent(new Event('visibilitychange'));await settle();assert(t.clicks.length===1,'focus repeated playback');
+ });
+ await check('Pause holds FIFO and completion starts the next native response',async()=>{
+  const t=await tab(sharedStorage(true),{history:turn('old','Old answer')});await t.send('first');t.publish('paused');await t.send('second');assert(t.clicks.length===1,'pause was interrupted');t.publish('ended');await settle();assert(t.clicks.join(',')==='first,second','queue did not advance');
+ });
+ await check('Global settings updates reach two independent queues without replaying history',async()=>{
+  const storage=sharedStorage(false);const a=await tab(storage,{history:turn('a-old','Old')});const b=await tab(storage,{history:turn('b-old','Old')});storage.set(true);await settle();assert(a.clicks.length+b.clicks.length===0,'enabling played history');await a.send('a-one');a.publish('paused');await a.send('a-two');await b.send('b-one');assert(a.clicks.join(',')==='a-one','paused tab advanced');assert(b.clicks.join(',')==='b-one','independent tab was blocked');storage.set(false);a.publish('ended');await b.send('b-two');assert(a.clicks.length===1&&b.clicks.length===1,'disabling did not clear pending work');
+ });
+ await check('Close clears queued items and a future new response is still eligible',async()=>{
+  const t=await tab(sharedStorage(true));await t.send('first');t.publish('paused');await t.send('second');t.publish('closed');await settle();assert(t.clicks.length===1,'close started queued audio');await t.send('third');assert(t.clicks.join(',')==='first,third','future response did not start');
+ });
+ await check('Missing native action surfaces an actionable error in the popup status response',async()=>{
+  const t=await tab(sharedStorage(true));await t.send('missing','Completed answer',false);t.expire();assert(/Read Aloud/.test(t.status().error),'missing actionable status');
+ });
+ await check('Enter submission from the composer covers a dictation-generated transcript',async()=>{
+  const t=await tab(sharedStorage(true));const input=t.doc.getElementById('prompt-textarea');input.textContent='A transcribed utterance';input.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));t.doc.querySelector('[aria-label="Conversation"]').insertAdjacentHTML('beforeend',turn('dictated','Response to dictated text'));await settle();assert(t.clicks.join(',')==='dictated','composer submission was missed');
+ });
+ await check('Navigation while queued discards work from the previous conversation',async()=>{
+  const t=await tab(sharedStorage(true));await t.send('first');t.publish('paused');await t.send('second');t.location.href='https://chatgpt.com/c/other';await t.history('other-history');t.publish('ended');assert(t.clicks.join(',')==='first','navigation played old pending work');
+ });
+ await check('Empty Enter followed by opening history cannot arm automatic reading',async()=>{
+  const t=await tab(sharedStorage(true),{href:'https://chatgpt.com/'});t.doc.getElementById('prompt-textarea').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));t.location.href='https://chatgpt.com/c/history';await t.history('history');assert(t.clicks.length===0,'empty submission armed history');
+ });
+ await check('A settings change during startup wins over an older storage read',async()=>{
+  const storage=sharedStorage(false);let finish;storage.local.get=()=>new Promise(resolve=>finish=resolve);const t=await tab(storage);storage.set(true);finish({ae_player_settings:{autoReadAloud:false}});await settle();await t.send('latest-setting');assert(t.clicks.join(',')==='latest-setting','stale startup settings overwrote the checkbox');
+ });
+ for(const r of results){const li=document.createElement('li');li.className=r.pass?'pass':'fail';li.textContent=`${r.pass?'PASS':'FAIL'}: ${r.name}${r.error?' — '+r.error:''}`;document.getElementById('results').append(li);}
+ document.getElementById('summary').textContent=`${results.filter(r=>r.pass).length}/${results.length} passed`;
+ document.documentElement.dataset.testResult=results.every(r=>r.pass)?'passed':'failed';
+})();
+</script></html>

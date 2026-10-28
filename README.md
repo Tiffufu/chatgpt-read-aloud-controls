@@ -8,6 +8,7 @@ This project is not affiliated with OpenAI.
 
 ## Features
 
+- Optional automatic Read Aloud for newly completed responses, with an independent queue in each tab.
 - Floating player that appears when ChatGPT Read Aloud starts.
 - Play and pause controls.
 - Resumable first-Pause handoff to an extension-owned copy after capture is seek-ready.
@@ -49,6 +50,22 @@ Open the extension icon to configure player settings:
 - **Theme**: follow system, light, or dark.
 
 Settings are saved with `chrome.storage.local` and forwarded to active ChatGPT tabs by the extension settings bridge. Defaults, speed options, limits, and validation are defined only in `src/js/player-settings.js`; other scripts consume that shared settings contract rather than carrying duplicate defaults.
+
+Check **Automatically read new responses aloud** to read completed replies without
+pressing Read Aloud. The setting starts off and applies across ChatGPT tabs;
+each tab keeps its own queue. Opening or focusing an existing conversation does
+not narrate its history. Pause holds the queue, and closing the controller clears
+that tab's waiting responses. Turning the setting off clears pending work while
+leaving audio already playing alone. Queues are discarded on navigation or reload.
+
+After updating the unpacked extension, reload it in Chrome's extension manager
+and refresh the ChatGPT tabs where you want to use the new option. See
+[`docs/AUTO_READ_ALOUD.md`](docs/AUTO_READ_ALOUD.md) for the runtime contract and
+verification details.
+
+Automatic reading can intermittently fail to start on some ChatGPT tabs. The
+conditions are still being investigated; native Read Aloud remains the manual
+fallback. This branch includes that known limitation.
 
 ## Download behavior
 

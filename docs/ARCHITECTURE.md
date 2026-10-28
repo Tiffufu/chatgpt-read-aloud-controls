@@ -29,7 +29,7 @@ The page owns transitions between its audio elements before handoff. Passive tra
 
 ## Streaming timeline
 
-`src/js/media-timeline.js` resolves a display timeline without mutating active playback. A finite native duration is authoritative. When streamed audio continues to report an indefinite duration, a detached audio element reads stable metadata from the completed capture blob. Moving `seekable` and `buffered` endpoints are never treated as the total duration.
+`src/js/media-timeline.js` resolves a display timeline without mutating active playback. For validated AAC-LC captures, `src/js/aac-container.js` counts ADTS frames and supplies an exact duration, which overrides the native stream's bitrate-based duration estimate. For other formats a finite native duration is authoritative; a detached metadata probe supplies the fallback when it is indefinite. Moving `seekable` and `buffered` endpoints are never treated as the total duration.
 
 The stable total may describe more audio than ChatGPT currently exposes as seekable. The full timeline remains visible, but seek and skip targets are constrained to the live seekable ranges. Targets in gaps or unloaded tails snap to a safe boundary instead of interrupting playback.
 
@@ -37,7 +37,9 @@ Elapsed and total listening-time labels are divided by the selected playback rat
 
 ## Captured playback handoff
 
-`src/js/captured-playback.js` prepares a separate detached audio element from the completed capture blob. It never starts playback: readiness requires metadata plus at least one nonempty seekable range, and failure or a 5-second timeout unloads the element and revokes its object URL.
+`src/js/aac-container.js` validates a complete, consistent AAC-LC ADTS stream (single-block mono/stereo, up to 48 kHz) and packages its unchanged compressed samples into an in-memory M4A container. Explicit sample sizes, offsets, and timestamps give the browser an exact duration and seek index. This prevents a long recording's initial bitrate estimate from truncating the captured copy's seek range. Unsupported or malformed captures keep the original playback path. Downloads retain the original capture.
+
+`src/js/captured-playback.js` prepares a separate detached audio element from that completed playback blob. It never starts playback: readiness requires metadata plus at least one nonempty seekable range, and failure or a 5-second timeout unloads the element and revokes its object URL.
 
 Until that element is ready, the Play/Pause button is disabled and announces `Preparing resumable playback`. Preparation failure leaves ChatGPT playback untouched and reports `Pause unavailable`; a completed capture may still be downloaded.
 

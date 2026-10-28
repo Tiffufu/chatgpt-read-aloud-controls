@@ -20,6 +20,10 @@ Reads `chrome.storage.local`, listens for popup updates, accepts scoped player-o
 
 Resolves a stable display duration from finite native metadata or completed-capture metadata, normalizes the live seekable ranges, clamps seek targets to those ranges, and probes a detached completed blob when streamed media reports an indefinite duration. It never mutates the active playback element.
 
+### `src/js/aac-container.js`
+
+Validates completed AAC-LC ADTS captures and creates a lossless M4A playback copy with explicit sample tables. Its frame-count duration takes precedence over the original stream's bitrate estimate. Other formats and unsupported configurations retain the existing playback path; the downloaded capture stays unchanged.
+
 ### `src/js/captured-playback.js`
 
 Creates the detached blob-backed playback controller used for resumable Pause. It resolves readiness only after metadata and a valid seekable range exist, never calls `play()`, and owns idempotent pause, unload, timeout, and object-URL revocation cleanup.

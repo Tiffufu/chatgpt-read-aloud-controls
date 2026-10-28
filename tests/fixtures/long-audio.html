@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Long audio verification</title>
+<style>body{font:16px system-ui;margin:180px 32px 32px;max-width:900px}pre{white-space:pre-wrap}button,input{font:inherit;margin:8px}</style>
+<h1>Long audio verification</h1>
+<p>Choose a local AAC recording. This page keeps the file in this browser and exercises the production capture, timeline, and playback controls.</p>
+<input type="file" accept="audio/*" aria-label="Local audio file">
+<button id="start" disabled>Start near the end</button>
+<pre id="state">Choose a recording.</pre>
+<script>
+const allAudio=[];
+const originalCreate=document.createElement.bind(document);
+document.createElement=function(...args){const element=originalCreate(...args);if(args[0]==='audio')allAudio.push(element);return element;};
+let file;
+let nativeAudio;
+let prepared;
+let latestLifecycle;
+const originalFetch=window.fetch.bind(window);
+window.fetch=(input,...args)=>String(input).includes('/backend-api/synthesize')
+    ?Promise.resolve(new Response(file,{headers:{'content-type':'audio/aac'}}))
+    :originalFetch(input,...args);
+document.addEventListener('ae-read-aloud-player:playback',event=>{latestLifecycle=event.detail;});
+</script>
+<script src="../../src/js/player-settings.js"></script>
+<script src="../../src/js/aac-container.js"></script>
+<script src="../../src/js/media-timeline.js"></script>
+<script src="../../src/js/captured-playback.js"></script>
+<script src="../../src/js/content-script.js"></script>
+<script>
+document.querySelector('input').addEventListener('change',async(event)=>{
+    file=event.target.files[0];
+    if(!file)return;
+    prepared=await AEPlayerAacContainer.prepareCapturedAudio(file);
+    document.querySelector('#start').disabled=false;
+    document.querySelector('#state').textContent=JSON.stringify({exactDuration:prepared.duration,type:prepared.blob.type});
+});
+document.querySelector('#start').addEventListener('click',async()=>{
+    await fetch('https://chatgpt.com/backend-api/synthesize');
+    nativeAudio=document.createElement('audio');
+    nativeAudio.src=URL.createObjectURL(prepared.blob);
+    nativeAudio.addEventListener('loadedmetadata',async()=>{
+        nativeAudio.currentTime=Math.max(0,prepared.duration-90);
+        try{await nativeAudio.play();}catch(error){document.querySelector('#state').textContent=error.message;}
+    },{once:true});
+    nativeAudio.load();
+});
+setInterval(()=>{
+    if(!nativeAudio)return;
+    const media=allAudio.filter(a=>a.src).map(a=>({native:a===nativeAudio,currentTime:a.currentTime,duration:a.duration,
+        paused:a.paused,ended:a.ended,readyState:a.readyState,
+        seekable:Array.from({length:a.seekable.length},(_,i)=>[a.seekable.start(i),a.seekable.end(i)])}));
+    document.querySelector('#state').textContent=JSON.stringify({exactDuration:prepared.duration,lifecycle:latestLifecycle,media},null,2);
+},100);
+</script>
+</html>

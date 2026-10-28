@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Auto Read Aloud browser tests</title>
+<style>body{font:16px system-ui;max-width:880px;margin:40px auto;background:#fafaf8;color:#222}li{margin:12px 0}.fail{color:#b42318}.pass{color:#067647}#fixture{display:none}</style>
+<h1>Auto Read Aloud browser tests</h1><p id="summary">Running…</p><ol id="results"></ol><div id="fixture"></div>
+<script>window.module = {exports:{}};</script>
+<script>document.write('<script src="../../src/js/auto-read-aloud.js?test='+Date.now()+'"><\/script>');</script>
+<script>
+const {createChatGPTAdapter,createAutoReadController} = module.exports;
+const fixture=document.getElementById('fixture');
+const results=[];
+function check(name, fn){try{fn();results.push({name,pass:true});}catch(e){results.push({name,pass:false,error:e.message});}}
+function assert(value, message){if(!value)throw new Error(message);}
+function workTurn(id, answer, state='complete'){
+ return `<div data-turn-key="${id}"><div data-talvt-turn-state="${state}"><div><h4 data-conversation-role="user">You said:</h4><p>User input</p><button aria-label="Edit message"></button></div>${answer===null?'':`<div><h4 data-conversation-role="assistant">ChatGPT said:</h4><div data-dil-message-id="message-${id}">${answer}</div><button aria-label="Read aloud" aria-pressed="false"></button></div>`}</div></div>`;
+}
+const adapter=createChatGPTAdapter(fixture,{href:'https://chatgpt.com/c/test'});
+check('Work layout extracts assistant text and stable response identity',()=>{
+ fixture.innerHTML=workTurn('one','<p>Assistant answer.</p>');
+ const s=adapter.snapshot();assert(s.turns.length===1,'expected one assistant response');assert(s.turns[0].id==='one','wrong identity');assert(s.turns[0].state==='complete','not complete');assert(s.userKey==='one','user key missing');
+ const signature=s.turns[0].signature;
+ fixture.querySelector('[data-conversation-role="user"]').nextElementSibling.textContent='Changed user input';
+ assert(adapter.snapshot().turns[0].signature===signature,'user text must not affect assistant signature');
+});
+check('User-only Work turns are never treated as assistant responses',()=>{
+ fixture.innerHTML=workTurn('user-only',null);
+ assert(adapter.snapshot().turns.length===0,'user-only turn treated as assistant');
+});
+check('An empty assistant response is excluded even when user text exists',()=>{
+ fixture.innerHTML=workTurn('empty','');
+ assert(adapter.snapshot().turns[0].hasText===false,'user text made the empty answer eligible');
+});
+check('Streaming Work turns do not complete during a temporary text pause',()=>{
+ fixture.innerHTML=workTurn('stream','<p>Partial answer.</p>','in_progress');
+ fixture.insertAdjacentHTML('beforeend','<button aria-label="Stop generating"></button>');
+ assert(adapter.snapshot().generating===true,'generation not detected');assert(adapter.snapshot().turns[0].state==='generating','premature completion');
+});
+check('The live composer Stop label marks generation even when the turn container says complete',()=>{
+ fixture.innerHTML=workTurn('live','<p>Partial answer.</p>','complete')+'<button aria-label="Stop"></button>';
+ assert(adapter.snapshot().generating===true,'live generation control was missed');
+});
+check('Classic layout identifies its message and native test-id action',()=>{
+ fixture.innerHTML='<div data-message-id="classic-user" data-message-author-role="user">Hi</div><div data-message-id="classic" data-message-author-role="assistant"><div class="markdown">Hello</div><button data-testid="voice-play-turn-action-button"></button></div>';
+ const s=adapter.snapshot();assert(s.turns[0].id==='classic','wrong classic id');assert(s.userKey==='classic-user','wrong classic user id');assert(!!s.turns[0].read,'missing action');
+});
+check('Adapter and queue click the completed response once and wait behind paused audio',()=>{
+ fixture.innerHTML=workTurn('old','<p>Historical</p>');let clicks=[];let timer;
+ const c=createAutoReadController({start(item){adapter.find(item.id).read.click();return true;},schedule(fn){timer=fn;return 1;},cancel(){timer=null;}});
+ fixture.addEventListener('click',e=>{const action=adapter.clickKind(e.target);if(action?.type==='read')clicks.push(action.id);});
+ c.setEnabled(true,adapter.snapshot());c.playback({sessionId:1,state:'paused'});
+ c.beginGeneration();fixture.insertAdjacentHTML('beforeend',workTurn('new','<p>New reply</p>'));
+ c.scan(adapter.snapshot());assert(clicks.length===0,'interrupted paused audio');
+ c.playback({sessionId:1,state:'ended'});assert(clicks.join(',')==='new','new reply did not start');
+ c.scan(adapter.snapshot());assert(clicks.length===1,'duplicate playback');
+});
+for(const r of results){const li=document.createElement('li');li.className=r.pass?'pass':'fail';li.textContent=`${r.pass?'PASS':'FAIL'}: ${r.name}${r.error?' — '+r.error:''}`;document.getElementById('results').append(li);}
+document.getElementById('summary').textContent=`${results.filter(r=>r.pass).length}/${results.length} passed`;
+document.documentElement.dataset.testResult=results.every(r=>r.pass)?'passed':'failed';
+</script></html>

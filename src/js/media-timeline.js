@@ -42,7 +42,7 @@
         return ranges.sort((left, right) => left.start - right.start);
     };
 
-    const resolveMediaTimeline = (mediaElement, capturedDuration = 0) => {
+    const resolveMediaTimeline = (mediaElement, capturedDuration = 0, capturedDurationIsExact = false) => {
         if (!mediaElement) return null;
 
         const nativeDuration = Number(mediaElement.duration);
@@ -51,7 +51,8 @@
         const hasCapturedDuration = Number.isFinite(stableCapturedDuration) && stableCapturedDuration > 0;
         if (!hasNativeDuration && !hasCapturedDuration) return null;
 
-        const duration = hasNativeDuration ? nativeDuration : stableCapturedDuration;
+        const useNativeDuration = hasNativeDuration && !(capturedDurationIsExact && hasCapturedDuration);
+        const duration = useNativeDuration ? nativeDuration : stableCapturedDuration;
         const rawCurrentTime = Number(mediaElement.currentTime);
         const currentTime = Number.isFinite(rawCurrentTime)
             ? Math.min(duration, Math.max(0, rawCurrentTime))
@@ -61,7 +62,7 @@
         return {
             currentTime,
             duration,
-            source: hasNativeDuration ? 'native' : 'captured',
+            source: useNativeDuration ? 'native' : 'captured',
             seekableRanges,
             canSeek: seekableRanges.length > 0
         };

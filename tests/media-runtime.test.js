@@ -260,6 +260,18 @@ test('timeline remains visible but non-seekable when no range is available', () 
     });
 });
 
+test('verified frame duration overrides changing bitrate estimates on the native stream', () => {
+    const { resolveMediaTimeline } = loadMediaTimeline();
+    const media = { currentTime: 900, duration: 796, seekable: createTimeRanges([[0, 950]]) };
+    for (const estimate of [796, 1005, 796]) {
+        media.duration = estimate;
+        const result = resolveMediaTimeline(media, 990.5493333333334, true);
+        assert.equal(result.currentTime, 900);
+        assert.equal(result.duration, 990.5493333333334);
+        assert.equal(result.source, 'captured');
+    }
+});
+
 test('seek target stays exact inside a loaded range', () => {
     const { resolveSeekTarget } = loadMediaTimeline();
     const media = { seekable: createTimeRanges([[0, 120], [180, 240]]) };
@@ -621,6 +633,7 @@ const createContentScriptHarness = ({
     capturedDuration = 420,
     capturedPlaybackMode = 'ready',
     capturedSeekable = [[0, capturedDuration]],
+    captureBytes = new Uint8Array([1, 2, 3]),
     deferCaptureCompletion = false,
     now = () => Date.now()
 } = {}) => {
@@ -630,6 +643,7 @@ const createContentScriptHarness = ({
     const intervalCallbacks = new Map();
     const windowListeners = new Map();
     const capturedAudioElements = [];
+    const capturedBlobs = [];
     const capturedPlaybackControllers = [];
     const capturedPlaybackTimeouts = [];
     const revokedPlaybackUrls = [];
@@ -658,10 +672,11 @@ const createContentScriptHarness = ({
     const createResponse = () => ({
         body: null,
         headers: { get: () => 'audio/aac' },
-        arrayBuffer: () => deferredCapture || Promise.resolve(new Uint8Array([1, 2, 3]).buffer),
+        arrayBuffer: () => deferredCapture || Promise.resolve(captureBytes.buffer),
         clone: () => createResponse()
     });
     const context = {
+        AbortController,
         Blob,
         CustomEvent: FakeCustomEvent,
         Date: { now },
@@ -716,8 +731,10 @@ const createContentScriptHarness = ({
         ...mediaTimeline,
         probeBlobDuration: async () => capturedDuration
     };
+    context.AEPlayerAacContainer = require('../src/js/aac-container.js');
     context.AEPlayerCapturedPlayback = {
         createCapturedPlayback: (blob) => {
+            capturedBlobs.push(blob);
             const capturedAudio = document.createElement('audio');
             capturedAudioElements.push(capturedAudio);
             if (capturedPlaybackMode === 'ready') {
@@ -795,6 +812,7 @@ const createContentScriptHarness = ({
 
     return {
         capturedAudioElements,
+        capturedBlobs,
         capturedPlaybackControllers,
         completeCapture,
         context,
@@ -949,6 +967,30 @@ test('first pause transfers exact position and rate before pausing the page stre
     });
     assert.equal(pageAudio.pauseCalls, 1);
     assert.equal(capturedAudio.paused, true);
+});
+
+test('indexed capture keeps a stable total and supports pause past the native duration estimate', async () => {
+    const captureBytes = Uint8Array.from(Array.from({ length: 3000 }, () =>
+        [0xff, 0xf1, 0x58, 0x40, 1, 0x1f, 0xfc, 0]).flat());
+    const harness = createContentScriptHarness({ capturedDuration: 128, captureBytes });
+    await harness.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    const pageAudio = harness.createAudio('blob:long-page-read-aloud', {
+        currentTime: 110, duration: 100, seekable: [[0, 120]]
+    });
+    await pageAudio.play();
+    // Blob.arrayBuffer() crosses a Node task boundary for the larger capture.
+    await new Promise(setImmediate);
+    await harness.flushMicrotasks();
+    assert.equal(harness.capturedBlobs[0].type, 'audio/mp4');
+    assert.ok(harness.findPlayerElement(e => e.textContent === '1:50'));
+    assert.ok(harness.findPlayerElement(e => e.textContent === '2:08'));
+    harness.findButton('Pause').click();
+    await harness.flushMicrotasks();
+    assert.equal(pageAudio.paused, true);
+    assert.equal(harness.capturedAudioElements[0].currentTime, 110);
+    harness.findButton('Play').click();
+    await harness.flushMicrotasks();
+    assert.equal(harness.capturedAudioElements[0].paused, false);
 });
 
 test('first pause rejects an unavailable exact position without pausing the page stream', async () => {
@@ -1481,4 +1523,97 @@ test('a same-millisecond response cannot reclaim audio that played before the se
 
     assert.equal(harness.context.document.getElementById('ae_enhanced_player'), null);
     assert.equal(firstAudio.pauseCalls, 0);
+});
+
+const listenToPlayback = (harness) => {
+    const states = [];
+    harness.context.document.addEventListener('ae-read-aloud-player:playback', event => states.push(event.detail));
+    return states;
+};
+
+test('playback lifecycle reports native start and completion even in a hidden tab', async () => {
+    const h = createContentScriptHarness();
+    const states = listenToPlayback(h);
+    h.context.document.visibilityState = 'hidden';
+    h.context.document.dispatchEvent(new h.context.CustomEvent('ae-read-aloud-player:playback-intent', {
+        detail: { responseId: 'answer-1', requestId: 'auto-1' }
+    }));
+    await h.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    const audio = h.createAudio('blob:page-read-aloud');
+    await audio.play();
+    await h.flushMicrotasks();
+    assert.ok(states.some(value => value.state === 'starting' && value.requestId === 'auto-1'));
+    assert.ok(states.some(value => value.state === 'playing' && value.responseId === 'answer-1'));
+    audio.ended = true;
+    audio.paused = true;
+    audio.dispatchEvent({ type: 'ended' });
+    assert.equal(states.at(-1).state, 'ended');
+    assert.equal(states.at(-1).sessionId, 1);
+});
+
+test('captured playback handoff holds pause and ignores ended from the replaced source', async () => {
+    const h = createContentScriptHarness();
+    const states = listenToPlayback(h);
+    await h.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    const audio = h.createAudio('blob:page-read-aloud', { currentTime: 20, seekable: [[0, 420]] });
+    await audio.play();
+    await h.runIntervals();
+    h.findButton('Pause').click();
+    await h.flushMicrotasks();
+    assert.equal(states.at(-1).state, 'paused');
+    const count = states.length;
+    audio.dispatchEvent({ type: 'ended' });
+    assert.equal(states.length, count);
+    const captured = h.capturedAudioElements[0];
+    await captured.play();
+    captured.dispatchEvent({ type: 'playing' });
+    assert.equal(states.at(-1).state, 'playing');
+    captured.ended = true;
+    captured.dispatchEvent({ type: 'ended' });
+    assert.equal(states.at(-1).state, 'ended');
+});
+
+test('snapshot describes a paused owner and close publishes closed before releasing audio', async () => {
+    const h = createContentScriptHarness();
+    const states = listenToPlayback(h);
+    await h.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    const audio = h.createAudio('blob:page-read-aloud', { currentTime: 20, seekable: [[0, 420]] });
+    await audio.play();
+    await h.runIntervals();
+    h.findButton('Pause').click();
+    h.context.document.dispatchEvent(new h.context.CustomEvent('ae-read-aloud-player:playback-request'));
+    assert.equal(states.at(-1).state, 'paused');
+    h.findButton('Close player').click();
+    assert.equal(states.at(-1).state, 'closed');
+    h.capturedAudioElements[0].dispatchEvent({ type: 'ended' });
+    assert.equal(states.at(-1).state, 'closed');
+});
+
+test('cancelled automatic intent cannot start synthesis later', async () => {
+    const h = createContentScriptHarness();
+    const states = listenToPlayback(h);
+    h.context.document.dispatchEvent(new h.context.CustomEvent('ae-read-aloud-player:playback-intent', {
+        detail: {responseId:'late',requestId:'auto-late'}
+    }));
+    h.context.document.dispatchEvent(new h.context.CustomEvent('ae-read-aloud-player:playback-cancel', {
+        detail: {requestId:'auto-late'}
+    }));
+    await assert.rejects(h.context.fetch('https://chatgpt.com/backend-api/synthesize'), {name:'AbortError'});
+    assert.equal(states.some(s=>s.requestId==='auto-late'&&s.state==='starting'),false);
+});
+
+test('completed capture cannot start its delayed page audio after cancellation', async () => {
+    const h = createContentScriptHarness();
+    const states = listenToPlayback(h);
+    h.context.document.dispatchEvent(new h.context.CustomEvent('ae-read-aloud-player:playback-intent', {
+        detail: {responseId:'late',requestId:'auto-late'}
+    }));
+    await h.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    await h.flushMicrotasks();
+    h.context.document.dispatchEvent(new h.context.CustomEvent('ae-read-aloud-player:playback-cancel', {
+        detail: {requestId:'auto-late'}
+    }));
+    const audio=h.createAudio('blob:late-page-audio');
+    await assert.rejects(audio.play(),{name:'AbortError'});
+    assert.equal(states.some(s=>s.requestId==='auto-late'&&s.state==='playing'),false);
 });

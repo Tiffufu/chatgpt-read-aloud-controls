@@ -24,7 +24,8 @@
         skipBackSeconds: 15,
         skipForwardSeconds: 15,
         playbackRate: 1,
-        theme: THEME.SYSTEM
+        theme: THEME.SYSTEM,
+        autoReadAloud: false
     });
 
     const clampSkipSeconds = (value, fallback) => {
@@ -61,7 +62,8 @@
         playbackRate: normalizePlaybackRate(
             settings.playbackRate ?? settings.playbackSpeed ?? settings.defaultPlaybackRate
         ),
-        theme: normalizeTheme(settings.theme)
+        theme: normalizeTheme(settings.theme),
+        autoReadAloud: settings.autoReadAloud === true
     });
 
     window.AEPlayerSettings = Object.freeze({

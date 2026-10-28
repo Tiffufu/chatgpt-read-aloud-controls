@@ -1,6 +1,6 @@
 {
   "name": "Read Aloud Controls for ChatGPT",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Adds a floating player with seek, speed, skip, theme, and download controls for ChatGPT Read Aloud.",
   "action": {
     "default_icon": {
@@ -23,7 +23,8 @@
         "https://chatgpt.com/*"
       ],
       "js": [
-        "src/js/settings-bridge.js"
+        "src/js/settings-bridge.js",
+        "src/js/auto-read-aloud.js"
       ],
       "run_at": "document_start"
     },
@@ -33,6 +34,7 @@
       ],
       "js": [
         "src/js/player-settings.js",
+        "src/js/aac-container.js",
         "src/js/media-timeline.js",
         "src/js/captured-playback.js",
         "src/js/content-script.js"
