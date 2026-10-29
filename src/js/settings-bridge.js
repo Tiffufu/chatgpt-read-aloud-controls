@@ -14,11 +14,30 @@
     const SETTINGS_UPDATE_REQUEST_EVENT = 'ae-read-aloud-player:settings-update-request';
 
     const chromeApi = typeof chrome !== 'undefined' ? chrome : null;
+    let invalidated = false;
+    const invalidate = () => {
+        if (invalidated) return;
+        invalidated = true;
+        document.dispatchEvent(new CustomEvent('ae-read-aloud-player:extension-invalidated'));
+    };
+    const isAvailable = () => {
+        if (invalidated) return false;
+        if (chromeApi?.runtime && !chromeApi.runtime.id) {
+            invalidate();
+            return false;
+        }
+        return true;
+    };
+    const reportFailure = (operation, error) => {
+        if (/extension context invalidated/i.test(error?.message || '')) invalidate();
+        else console.error(`[Read Aloud Controls for ChatGPT] Failed to ${operation} settings`, error);
+    };
     const normalizePayload = (settings) => (
         settings && typeof settings === 'object' ? { ...settings } : {}
     );
 
     const postSettings = (settings, reason = 'snapshot') => {
+        if (!isAvailable()) return;
         document.dispatchEvent(new CustomEvent(SETTINGS_EVENT, {
             detail: {
                 reason,
@@ -28,14 +47,17 @@
     };
 
     const readStoredSettings = async () => {
+        if (!isAvailable()) return null;
         if (!chromeApi?.storage?.local) return {};
         const result = await chromeApi.storage.local.get(STORAGE_KEY);
         return normalizePayload(result?.[STORAGE_KEY]);
     };
 
     const saveStoredSettings = async (settings, reason = 'saved') => {
+        const stored = await readStoredSettings();
+        if (!stored || !isAvailable()) return;
         const nextSettings = {
-            ...await readStoredSettings(),
+            ...stored,
             ...normalizePayload(settings)
         };
 
@@ -50,8 +72,8 @@
         try {
             postSettings(await readStoredSettings(), reason);
         } catch (err) {
-            console.error('[Read Aloud Controls for ChatGPT] Failed to read settings', err);
-            postSettings({}, 'fallback');
+            reportFailure('read', err);
+            if (!invalidated) postSettings({}, 'fallback');
         }
     };
 
@@ -61,7 +83,7 @@
 
     document.addEventListener(SETTINGS_UPDATE_REQUEST_EVENT, (event) => {
         saveStoredSettings(event.detail?.settings, 'player-updated').catch((err) => {
-            console.error('[Read Aloud Controls for ChatGPT] Failed to save settings', err);
+            reportFailure('save', err);
         });
     });
 

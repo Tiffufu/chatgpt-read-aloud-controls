@@ -242,6 +242,39 @@ test('a later unrelated playback cannot acknowledge an automatic start', () => {
     assert.equal(h.errors.filter(Boolean).length, 1);
 });
 
+test('start timeouts distinguish an unavailable native action from unconfirmed audio', () => {
+    const missing = harness(snapshot([turn('a', 'generating')], { generating: true }), { missingAction: true });
+    missing.scan([turn('a')]); missing.expire();
+    assert.match(missing.errors.at(-1), /button|control/i);
+    const clicked = harness(snapshot([turn('a', 'generating')], { generating: true }));
+    clicked.scan([turn('a')]); clicked.expire();
+    assert.match(clicked.errors.at(-1), /playback.*15 seconds/i);
+});
+
+test('browser autoplay rejection reports the needed manual action immediately', () => {
+    const h = harness(snapshot([turn('a', 'generating')], { generating: true }));
+    h.scan([turn('a')]);
+    h.state('error', 1, { requestId: h.starts[0].requestId, responseId: 'a', reason: 'autoplay-blocked' });
+    assert.match(h.errors.at(-1), /browser.*automatic playback/i);
+    assert.match(h.errors.at(-1), /manually/i);
+});
+
+test('an audio error after confirmed playback is not reported as a start failure', () => {
+    const h = harness(snapshot([turn('a', 'generating')], { generating: true }));
+    h.scan([turn('a')]);
+    const identity = { requestId: h.starts[0].requestId, responseId: 'a' };
+    h.state('playing', 1, identity);
+    h.state('error', 1, { ...identity, reason: 'media-decode' });
+    assert.match(h.errors.at(-1), /decode/i);
+    assert.doesNotMatch(h.errors.at(-1), /could not start/i);
+});
+
+test('disabled automatic reading does not report errors from manual playback', () => {
+    const h = harness(); h.enable(false);
+    h.state('error', 1, { reason: 'media-decode' });
+    assert.equal(h.errors.filter(Boolean).length, 0);
+});
+
 test('opening or focusing a tab cannot start newly mounted historical turns', () => {
     const h = harness(snapshot([turn('visible-history')], { userKey: 'visible-user' }));
     h.scan([turn('another-history')], { userKey: 'another-user' });

@@ -1551,6 +1551,31 @@ test('playback lifecycle reports native start and completion even in a hidden ta
     assert.equal(states.at(-1).sessionId, 1);
 });
 
+test('rejected automatic play reports the browser restriction without waiting for a timeout', async () => {
+    const h = createContentScriptHarness();
+    const states = listenToPlayback(h);
+    h.context.document.dispatchEvent(new h.context.CustomEvent('ae-read-aloud-player:playback-intent', {
+        detail: { responseId: 'answer', requestId: 'auto-blocked' }
+    }));
+    await h.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    const audio = h.createAudio('blob:blocked-read-aloud');
+    const error = new Error('play() requires a user gesture'); error.name = 'NotAllowedError';
+    audio.playImplementation = () => Promise.reject(error);
+    await assert.rejects(audio.play(), { name: 'NotAllowedError' });
+    await h.flushMicrotasks();
+    assert.equal(states.at(-1).state, 'error');
+    assert.equal(states.at(-1).reason, 'autoplay-blocked');
+    assert.equal(states.at(-1).requestId, 'auto-blocked');
+});
+
+test('native media failures retain a specific decoder error reason', async () => {
+    const h = createContentScriptHarness(); const states = listenToPlayback(h);
+    await h.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    const audio = h.createAudio('blob:decode-failure'); await audio.play(); await h.flushMicrotasks();
+    audio.error = { code: 3 }; audio.dispatchEvent({ type: 'error' });
+    assert.equal(states.at(-1).reason, 'media-decode');
+});
+
 test('captured playback handoff holds pause and ignores ended from the replaced source', async () => {
     const h = createContentScriptHarness();
     const states = listenToPlayback(h);

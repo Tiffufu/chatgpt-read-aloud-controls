@@ -12,6 +12,15 @@
     const INTENT_EVENT = 'ae-read-aloud-player:playback-intent';
     const CANCEL_EVENT = 'ae-read-aloud-player:playback-cancel';
     const START_ERROR = 'Read Aloud could not start. Start it manually to continue the queue, or turn automatic reading off and on to reset it.';
+    const RECOVER = ' Start Read Aloud manually to continue the queue.';
+    const playbackError = reason => ({
+        'autoplay-blocked': 'The browser blocked automatic playback.' + RECOVER,
+        'request-failed': 'ChatGPT’s Read Aloud audio request failed.' + RECOVER,
+        'media-network': 'Read Aloud audio stopped because of a network error.' + RECOVER,
+        'media-decode': 'The browser could not decode the Read Aloud audio.' + RECOVER,
+        'media-unsupported': 'The browser could not play the Read Aloud audio format.' + RECOVER,
+        'media-aborted': 'Read Aloud audio playback was interrupted.' + RECOVER
+    }[reason] || 'Read Aloud audio playback failed.' + RECOVER);
 
     function createAutoReadController({ start, schedule = setTimeout, cancel = clearTimeout, onError = () => {}, onCancel = () => {} }) {
         let enabled = false;
@@ -94,9 +103,12 @@
             attempt = pending;
             pending.timer = schedule(() => {
                 if (attempt !== pending) return;
+                const message = pending.clicked
+                    ? 'Read Aloud playback was not confirmed within 15 seconds.' + RECOVER
+                    : 'ChatGPT’s Read Aloud button was unavailable for 15 seconds.' + RECOVER;
                 suspended = true;
                 clearAttempt(true);
-                onError(START_ERROR);
+                onError(message);
             }, 15000);
             tryStart();
         };
@@ -220,9 +232,10 @@
                     return;
                 }
                 if (value.state === 'error') {
+                    if (!enabled) return;
                     suspended = true;
                     clearAttempt(true);
-                    onError(START_ERROR);
+                    onError(playbackError(value.reason));
                     return;
                 }
                 if (value.state === 'ended') pump();
@@ -329,15 +342,18 @@
         let initialized = false;
         let scanScheduled = false;
         let settingsRevision = 0;
+        let disposed = false;
+        let observer = null;
+        let scanInterval = null;
         const dispatch = (name, detail) => document.dispatchEvent(new root.CustomEvent(name, { detail }));
         const controller = createAutoReadController({
             schedule: root.setTimeout.bind(root), cancel: root.clearTimeout.bind(root),
             onError: message => {
-                if (message && message !== error) root.console?.warn('[Read Aloud Controls]', message);
                 error = message;
             },
             onCancel: requestId => dispatch(CANCEL_EVENT, { requestId }),
             start(item, requestId) {
+                if (!contextAvailable()) return false;
                 const response = adapter.find(item.id);
                 if (!response?.read || response.read.disabled || response.read.getAttribute('aria-disabled') === 'true') return false;
                 if (response.signature !== item.signature || response.state !== 'complete') return false;
@@ -351,21 +367,36 @@
                 return true;
             }
         });
-        const scan = () => { if (initialized) controller.scan(adapter.snapshot()); };
+        const invalidate = () => {
+            if (disposed) return;
+            disposed = true;
+            enabled = false;
+            controller.setEnabled(false, adapter.snapshot());
+            observer?.disconnect();
+            if (scanInterval !== null) root.clearInterval?.(scanInterval);
+        };
+        const contextAvailable = () => {
+            if (disposed) return false;
+            if (chrome.runtime && !chrome.runtime.id) { invalidate(); return false; }
+            return true;
+        };
+        const scan = () => { if (initialized && contextAvailable()) controller.scan(adapter.snapshot()); };
         const scheduleScan = () => {
             if (scanScheduled) return;
             scanScheduled = true;
             root.queueMicrotask(() => { scanScheduled = false; scan(); });
         };
         const settings = value => {
+            if (!contextAvailable()) return;
             settingsRevision += 1;
             enabled = value?.autoReadAloud === true;
             if (initialized) controller.setEnabled(enabled, adapter.snapshot());
         };
-        document.addEventListener(PLAYBACK_EVENT, event => controller.playback(event.detail));
+        document.addEventListener('ae-read-aloud-player:extension-invalidated', invalidate);
+        document.addEventListener(PLAYBACK_EVENT, event => { if (!disposed) controller.playback(event.detail); });
         document.addEventListener('ae-read-aloud-player:settings', event => settings(event.detail?.settings));
         document.addEventListener('click', event => {
-            if (automaticClick) return;
+            if (automaticClick || !contextAvailable()) return;
             const action = adapter.clickKind(event.target);
             if (action?.type === 'read' && action.button.getAttribute('aria-pressed') !== 'true') {
                 dispatch(INTENT_EVENT, { responseId: action.id, requestId: null });
@@ -374,11 +405,13 @@
             else if (action?.type === 'generate' && (action.id || adapter.composerHasText())) controller.beginGeneration(action.id);
         }, true);
         document.addEventListener('submit', event => {
+            if (!contextAvailable()) return;
             if (adapter.composerHasText() && (adapter.isComposer(event.target) || event.target?.querySelector?.('#prompt-textarea, [contenteditable="true"][role="textbox"]'))) {
                 controller.beginGeneration();
             }
         }, true);
         document.addEventListener('keydown', event => {
+            if (!contextAvailable()) return;
             if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && adapter.isComposer(event.target) && adapter.composerHasText()) {
                 controller.beginGeneration();
             }
@@ -390,14 +423,16 @@
             if (area === 'local' && changes.ae_player_settings) settings(changes.ae_player_settings.newValue);
         });
         const ready = async () => {
+            if (!contextAvailable()) return;
             const revision = settingsRevision;
             try {
                 const stored = await chrome.storage.local.get('ae_player_settings');
                 if (settingsRevision === revision) settings(stored?.ae_player_settings);
             } catch (_error) { /* Remain off if storage is unavailable. */ }
+            if (!contextAvailable()) return;
             initialized = true;
             controller.setEnabled(enabled, adapter.snapshot());
-            const observer = new root.MutationObserver(mutations => {
+            observer = new root.MutationObserver(mutations => {
                 if (mutations.some(mutation => {
                     const element = mutation.target.nodeType === 1 ? mutation.target : mutation.target.parentElement;
                     return !element?.closest?.('#ae_enhanced_player');
@@ -411,7 +446,7 @@
             document.addEventListener('visibilitychange', scheduleScan);
             dispatch(SNAPSHOT_EVENT);
             // Handles SPA URL changes even when the conversation DOM has no mutation.
-            root.setInterval(scan, 1000);
+            scanInterval = root.setInterval(scan, 1000);
         };
         if (document.body) ready();
         else document.addEventListener('DOMContentLoaded', ready, { once: true });

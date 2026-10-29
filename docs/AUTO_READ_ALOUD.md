@@ -46,6 +46,24 @@ Lifecycle listeners operate in background tabs independently of UI refresh.
 The settings bridge retains its existing scoped-event design; it does not use
 `window.postMessage`.
 
+## Failure handling and extension reloads
+
+Recoverable playback failures appear in the popup's status area. They are not
+written as repeated console warnings. The status distinguishes an unavailable
+native button, a 15-second playback confirmation timeout, a rejected audio
+request, browser-blocked playback, and media network/decoder/format failures.
+The queue remains suspended until manual recovery or a settings reset.
+
+Reloading or updating the extension invalidates its isolated scripts in tabs
+that were already open. The settings bridge stops storage work when that happens
+and emits `ae-read-aloud-player:extension-invalidated`. The automatic reader
+cancels pending starts and stops observing the old tab; audio already playing
+continues. Refresh the ChatGPT tab to load the current extension scripts.
+
+Chrome's extension error list retains older entries after a repair. After
+reloading the extension and refreshing ChatGPT, clear those historical entries
+once when checking whether a new failure occurs.
+
 ## Verification
 
 ### Known limitation

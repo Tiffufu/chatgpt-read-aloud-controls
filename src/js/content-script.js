@@ -253,7 +253,9 @@
         ['playing', 'play', 'pause', 'ended', 'error'].forEach(name => {
             element.addEventListener?.(name, () => {
                 if (playerSession.isClosed || element !== playerSession.audioElement) return;
-                publishPlaybackState(name === 'error' ? 'error' : name === 'ended' ? 'ended' : undefined);
+                const reason = name === 'error'
+                    ? ({ 1: 'media-aborted', 2: 'media-network', 3: 'media-decode', 4: 'media-unsupported' }[element.error?.code] || 'media-failed') : '';
+                publishPlaybackState(name === 'error' ? 'error' : name === 'ended' ? 'ended' : undefined, reason);
             });
         });
     };
@@ -1825,6 +1827,9 @@
                     return Promise.reject(cancelledPlaybackError());
                 }
                 let playSequence = 0;
+                const sessionId = playerSession.id;
+                const belongsToSession = shouldTrack && (this === playerSession.audioElement
+                    || (!playerSession.audioElement && isReadAloudAudioElement(this)));
 
                 if (shouldTrack) {
                     rememberAudioElement(this);
@@ -1845,7 +1850,14 @@
                             startMonitoring();
                         }
                         checkObservedAudio();
-                    }, checkObservedAudio);
+                    }, error => {
+                        if (belongsToSession && isCurrentSession(sessionId) && !playerSession.isClosed
+                            && (!playerSession.audioElement || this === playerSession.audioElement)) {
+                            publishPlaybackState('error', error?.name === 'NotAllowedError'
+                                ? 'autoplay-blocked' : 'play-rejected');
+                        }
+                        checkObservedAudio();
+                    });
                 }
 
                 return result;

@@ -22,7 +22,8 @@
  async function tab(storage,{history='',href='https://chatgpt.com/c/test'}={}){
   const frame=document.createElement('iframe');document.body.append(frame);
   const doc=frame.contentDocument;doc.body.innerHTML=`<main><div aria-label="Conversation">${history}</div><div id="prompt-textarea" contenteditable="true" role="textbox"></div><button aria-label="Send"></button></main>`;
-  const clicks=[];const intents=[];const cancelled=[];const timers=new Map();let nextTimer=0;let listener;let session=0;
+  const clicks=[];const intents=[];const cancelled=[];const warnings=[];const timers=new Map();let nextTimer=0;let listener;let session=0;let tick;
+  const runtime={id:'test-extension',onMessage:{addListener:fn=>listener=fn}};
   const publish=(state,extra={})=>doc.dispatchEvent(new CustomEvent('ae-read-aloud-player:playback',{detail:{sessionId:session,state,...extra}}));
   doc.addEventListener('ae-read-aloud-player:playback-intent',e=>intents.push(e.detail));
   doc.addEventListener('ae-read-aloud-player:playback-cancel',e=>cancelled.push(e.detail.requestId));
@@ -33,12 +34,12 @@
    }
   });
   const location={href};
-  install({document:doc,chrome:{storage,runtime:{onMessage:{addListener:fn=>listener=fn}}},location,
+  install({document:doc,chrome:{storage,runtime},location,console:{warn:(...args)=>warnings.push(args)},
    CustomEvent,MutationObserver,queueMicrotask:fn=>queueMicrotask(fn),setTimeout(fn){const id=++nextTimer;timers.set(id,fn);return id;},clearTimeout:id=>timers.delete(id),
-   setInterval(){},addEventListener(){}});
+   setInterval(fn){tick=fn;return 1;},clearInterval(){tick=null;},addEventListener(){}});
   await settle();
   return {
-   doc,clicks,cancelled,publish,location,
+   doc,clicks,cancelled,publish,location,warnings,runtime,tick(){tick?.();},
    async send(id,answer='A new answer',read=true){
     doc.getElementById('prompt-textarea').textContent='Test submission '+id;
     doc.querySelector('button[aria-label="Send"]').click();
@@ -78,6 +79,20 @@
  });
  await check('A settings change during startup wins over an older storage read',async()=>{
   const storage=sharedStorage(false);let finish;storage.local.get=()=>new Promise(resolve=>finish=resolve);const t=await tab(storage);storage.set(true);finish({ae_player_settings:{autoReadAloud:false}});await settle();await t.send('latest-setting');assert(t.clicks.join(',')==='latest-setting','stale startup settings overwrote the checkbox');
+ });
+ await check('Extension reload stops automatic work in an invalidated tab',async()=>{
+  const t=await tab(sharedStorage(true));t.runtime.id=undefined;t.tick();await t.send('after-reload');
+  assert(t.clicks.length===0,'invalidated script kept starting playback');
+ });
+ await check('Settings bridge invalidation cancels pending automatic starts',async()=>{
+  const t=await tab(sharedStorage(true));await t.send('pending','Completed answer',false);
+  t.doc.dispatchEvent(new CustomEvent('ae-read-aloud-player:extension-invalidated'));
+  t.expire();assert(!t.status().error,'invalidated script reported a start timeout');
+ });
+ await check('Recoverable start failures remain in popup status without extension console warnings',async()=>{
+  const t=await tab(sharedStorage(true));await t.send('missing-action','Answer',false);t.expire();
+  assert(/button/.test(t.status().error),'missing native button was not identified');
+  assert(t.warnings.length===0,'recoverable failure polluted extension errors');
  });
  for(const r of results){const li=document.createElement('li');li.className=r.pass?'pass':'fail';li.textContent=`${r.pass?'PASS':'FAIL'}: ${r.name}${r.error?' — '+r.error:''}`;document.getElementById('results').append(li);}
  document.getElementById('summary').textContent=`${results.filter(r=>r.pass).length}/${results.length} passed`;
