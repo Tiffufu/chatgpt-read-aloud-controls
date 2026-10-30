@@ -9,6 +9,8 @@ This project is not affiliated with OpenAI.
 ## Features
 
 - Optional automatic Read Aloud for newly completed responses, with an independent queue in each tab.
+- Attached reading queue with response previews, drag or arrow reordering, removal, clear, and Undo.
+- Select another response's Read Aloud to queue it without interrupting current playback, even with automatic reading off.
 - Floating player that appears when ChatGPT Read Aloud starts.
 - Play and pause controls.
 - Resumable first-Pause handoff to an extension-owned copy after capture is seek-ready.
@@ -55,8 +57,19 @@ Check **Automatically read new responses aloud** to read completed replies witho
 pressing Read Aloud. The setting starts off and applies across ChatGPT tabs;
 each tab keeps its own queue. Opening or focusing an existing conversation does
 not narrate its history. Pause holds the queue, and closing the controller clears
-that tab's waiting responses. Turning the setting off clears pending work while
-leaving audio already playing alone. Queues are discarded on navigation or reload.
+that tab's waiting responses. Turning the setting off removes automatically
+added entries while keeping your explicit selections and audio already playing.
+Queues are discarded on navigation or reload.
+
+Use the queue button beside Download to show the reading list. Its number counts
+the current response plus waiting responses. Clicking a
+preview scrolls to and briefly highlights its source message; it does not change
+the playback order. Drag a row by its handle or use its arrow buttons to reorder.
+Remove or clear upcoming responses and use Undo to restore valid entries. Minimize
+hides the drawer and timeline together; expanding remembers the drawer's state.
+Start failures appear in the drawer with Retry as well as in the popup status.
+The queue stores response references and short snippets, and requests audio only
+when a response reaches its turn. There is no audio prefetch or persistent history.
 
 After updating the unpacked extension, reload it in Chrome's extension manager
 and refresh the ChatGPT tabs where you want to use the new option. See
@@ -78,6 +91,14 @@ The downloaded file is built from the audio response captured while ChatGPT is s
 Open `preview.html` directly in a browser to check the injected player UI without loading ChatGPT.
 
 The preview exercises layout, theme, time labels, speed, and download states. It does not simulate completion of the detached captured-player readiness lifecycle, so its Play/Pause control can remain in `Preparing resumable playback`. Use a live ChatGPT Read Aloud response for pause/resume validation.
+
+For an interactive local queue preview, serve the repository and open
+`tests/fixtures/reading-queue-preview.html`. It runs the actual player and queue
+against a local synthetic service boundary with silent WAV media. The UI checks
+are in `tests/fixtures/reading-queue.html`; native-click and queue integration
+checks are in `tests/fixtures/auto-read-runtime.html`. Keyboard focus and compact
+player regressions are in `tests/fixtures/quiet-player.html`. These do not replace live
+ChatGPT extension validation.
 
 Useful query parameters:
 

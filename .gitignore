@@ -30,3 +30,6 @@ Temporary Items
 *.swp
 *.swo
 *~
+
+# Local implementation and design companion scratch files
+.superpowers/

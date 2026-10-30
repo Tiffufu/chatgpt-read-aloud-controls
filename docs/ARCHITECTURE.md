@@ -76,6 +76,53 @@ Stored settings in `chrome.storage.local` still take precedence over defaults, s
 
 The download button reads from this session. It is visible but disabled until capture reaches `ready` with at least one chunk. This prevents partial downloads without hiding the affordance. The resting appearance is derived from semantic button state rather than hover, focus, or pressed styles. Starting a download keeps the download icon in place because Chrome's own download UI provides action feedback.
 
+## Reading queue
+
+`auto-read-aloud.js` owns the per-tab scheduler for both automatic completions and
+explicit native Read Aloud selections. An idle native selection passes through
+unchanged. A different selection while busy is suppressed only after it is
+successfully queued. Scheduled starts defer their native click to avoid the
+browser's reentrant click guard. Pending clicks are cancelled with pending starts. Automatic admission
+can be disabled without stopping the manually selected queue.
+
+`reading-queue.js` owns only the attached drawer, its expansion preference, and
+semantic editing/source-navigation commands. `content-script.js` mounts it beside
+Download and below the player, forwards scoped events, updates its theme, and
+preserves drawer preference across controller rebuilds. The queue module never
+captures, prefetches, or plays audio. Message previews use safe text rendering and
+bounded excerpts; queue state never includes DOM nodes or full response bodies.
+
+Snapshots and commands use the `ae-read-aloud-player:queue`, `queue-request`, and
+`queue-command` DOM events, following the existing settings/playback boundary.
+Undo restores only entries still valid in the same conversation/revision. A
+confirmed playback failure restores its response ahead of later queued entries.
+
+Advancing a queue replaces the audio session without replacing the mounted player.
+While the new session has no bound page audio and its capture is loading or ready,
+both UI refresh paths retain the existing controls and display a disabled
+`Starting next response` control. Position, timeline collapse, and drawer preference
+remain intact. A closed session or a previously bound owner that loses its source
+still follows normal teardown; this does not retain an unrelated old audio owner.
+
+## Player presentation
+
+`src/css/player.css` and `src/css/reading-queue.css` are declaratively injected by
+the manifest. Player selectors are scoped to the extension root; neither file
+depends on ChatGPT's layout classes. Theme values are supplied as CSS variables.
+The drawer module handles presentation and semantic commands only; ChatGPT
+selectors remain in the existing adapter in `auto-read-aloud.js`.
+
+Expanded and minimized layouts reuse one transport group. Moving that group
+leaves the title and window controls mounted, preserving keyboard focus. Skip
+labels and icons use the same validated settings in either layout. The drawer
+remembers its own expansion state while hidden by minimization. The queue badge
+counts the current response plus waiting responses, excluding ended responses
+and duplicate retry entries. No queued audio is prefetched or retained by the UI.
+
+The visual study is a separate development artifact. React and the study's build
+tools are not part of the extension. Keep future page compatibility fixes in the
+adapter/session layer rather than adding page selectors to the drawer or CSS.
+
 ## Debugging
 
 Debug logs are disabled by default. To enable scoped runtime logs in a tab:

@@ -22,11 +22,12 @@
  async function tab(storage,{history='',href='https://chatgpt.com/c/test'}={}){
   const frame=document.createElement('iframe');document.body.append(frame);
   const doc=frame.contentDocument;doc.body.innerHTML=`<main><div aria-label="Conversation">${history}</div><div id="prompt-textarea" contenteditable="true" role="textbox"></div><button aria-label="Send"></button></main>`;
-  const clicks=[];const intents=[];const cancelled=[];const warnings=[];const timers=new Map();let nextTimer=0;let listener;let session=0;let tick;
+  const clicks=[];const intents=[];const cancelled=[];const warnings=[];const snapshots=[];const timers=new Map();let nextTimer=0;let listener;let session=0;let tick;
   const runtime={id:'test-extension',onMessage:{addListener:fn=>listener=fn}};
   const publish=(state,extra={})=>doc.dispatchEvent(new CustomEvent('ae-read-aloud-player:playback',{detail:{sessionId:session,state,...extra}}));
   doc.addEventListener('ae-read-aloud-player:playback-intent',e=>intents.push(e.detail));
   doc.addEventListener('ae-read-aloud-player:playback-cancel',e=>cancelled.push(e.detail.requestId));
+  doc.addEventListener('ae-read-aloud-player:queue',e=>snapshots.push(e.detail));
   doc.addEventListener('click',e=>{
    if(e.target.matches('button[aria-label="Read aloud"]')){
     const intent=intents.at(-1);clicks.push(e.target.closest('[data-turn-key]').getAttribute('data-turn-key'));session++;
@@ -40,6 +41,8 @@
   await settle();
   return {
    doc,clicks,cancelled,publish,location,warnings,runtime,tick(){tick?.();},
+   queue(){return snapshots.at(-1);},
+   command(action,id,extra={}){doc.dispatchEvent(new CustomEvent('ae-read-aloud-player:queue-command',{detail:{action,id,...extra}}));},
    async send(id,answer='A new answer',read=true){
     doc.getElementById('prompt-textarea').textContent='Test submission '+id;
     doc.querySelector('button[aria-label="Send"]').click();
@@ -93,6 +96,65 @@
   const t=await tab(sharedStorage(true));await t.send('missing-action','Answer',false);t.expire();
   assert(/button/.test(t.status().error),'missing native button was not identified');
   assert(t.warnings.length===0,'recoverable failure polluted extension errors');
+ });
+ await check('Manual Read Aloud joins a paused queue without invoking the native button early',async()=>{
+  const t=await tab(sharedStorage(false),{history:turn('one','Yes. A useful first response for the reading queue.')+turn('two','A second response for later.')});
+  t.doc.querySelector('[data-turn-key="one"] button[aria-label="Read aloud"]').click();await settle();
+  assert(t.clicks.join(',')==='one',`first selection did not reach native playback; clicks=${JSON.stringify(t.clicks)}`);
+  t.publish('paused',{responseId:'one'});
+  t.doc.querySelector('[data-turn-key="two"] button[aria-label="Read aloud"]').click();await settle();
+  assert(t.clicks.join(',')==='one','manual selection interrupted current playback');
+  assert(t.queue()?.items[0]?.id==='two','manual selection missing from snapshot');
+  t.publish('ended',{responseId:'one'});await settle();
+  assert(t.clicks.join(',')==='one,two','manual queue did not advance with auto disabled');
+ });
+ await check('Drawer commands reorder remove and undo the real runtime queue',async()=>{
+  const t=await tab(sharedStorage(true));await t.send('first');t.publish('paused',{responseId:'first'});await t.send('second');await t.send('third');
+  t.command('move','third',{direction:-1});assert(t.queue()?.items.map(x=>x.id).join(',')==='third,second','move command failed');
+  t.command('remove','third');assert(t.queue()?.items[0]?.id==='second','remove command failed');
+  t.command('undo');assert(t.queue()?.items[0]?.id==='third','undo command failed');
+  t.publish('ended',{responseId:'first'});await settle();assert(t.clicks.join(',')==='first,third','runtime ignored edited order');
+ });
+ await check('A playing response native stop action is allowed through',async()=>{
+  const t=await tab(sharedStorage(false),{history:turn('one','A complete response.')});const button=t.doc.querySelector('button[aria-label="Read aloud"]');
+  button.click();await settle();button.setAttribute('aria-pressed','true');button.click();assert(t.clicks.length===2,'native stop was intercepted');
+ });
+ await check('Source navigation highlights the source without starting audio',async()=>{
+  const t=await tab(sharedStorage(false),{history:turn('one','A complete response.')});t.command('reveal','one');
+  assert(t.doc.querySelector('[data-turn-key="one"]').hasAttribute('data-ae-queue-highlight'),'source was not highlighted');assert(t.clicks.length===0,'source navigation started audio');
+ });
+ await check('Manual queue state contains no page nodes and extension invalidation clears it',async()=>{
+  const t=await tab(sharedStorage(false),{history:turn('one','A complete response.')});t.publish('paused');t.doc.querySelector('button[aria-label="Read aloud"]').click();
+  assert(t.queue()?.items.length===1,'manual item missing');assert(!('node' in t.queue().items[0]),'DOM leaked into queue snapshot');
+  t.doc.dispatchEvent(new CustomEvent('ae-read-aloud-player:extension-invalidated'));assert(t.queue().items.length===0,'invalidation retained manual queue');
+ });
+ await check('Removing a queued successor before its deferred click prevents native playback',async()=>{
+  const t=await tab(sharedStorage(false),{history:turn('one','First complete response.')+turn('two','Second complete response.')});
+  t.doc.querySelector('[data-turn-key="one"] button[aria-label="Read aloud"]').click();
+  t.doc.querySelector('[data-turn-key="two"] button[aria-label="Read aloud"]').click();
+  t.publish('ended');t.command('remove','two');await settle();
+  assert(t.clicks.join(',')==='one','removed successor started late');assert(t.queue().items.length===0,'removed successor remained in queue');
+ });
+ await check('A native selection recovers a suspended queue before a drawer exists',async()=>{
+  const t=await tab(sharedStorage(true));await t.send('missing','A complete response.',false);t.expire();
+  const button=t.doc.createElement('button');button.setAttribute('aria-label','Read aloud');button.setAttribute('aria-pressed','false');t.doc.querySelector('[data-turn-key="missing"]').append(button);button.click();await settle();
+  assert(t.clicks.join(',')==='missing','native selection did not retry failed start');assert(!t.status().error,'recovered queue kept its error');
+ });
+ await check('An idle native Read Aloud click reaches the page unchanged',async()=>{
+  const t=await tab(sharedStorage(false),{history:turn('one','A complete response.')});const button=t.doc.querySelector('button[aria-label="Read aloud"]');
+  const click=new MouseEvent('click',{bubbles:true,cancelable:true});button.dispatchEvent(click);await settle();
+  assert(!click.defaultPrevented,'idle native click was replaced by automation');assert(t.clicks.join(',')==='one','native action did not run');
+ });
+ await check('Unrecognized content cannot swallow an otherwise valid native Read Aloud action',async()=>{
+  const history=turn('one','A complete response.').replace('data-dil-message-id="message-one"','data-new-content-wrapper="one"');
+  const t=await tab(sharedStorage(false),{history});const click=new MouseEvent('click',{bubbles:true,cancelable:true});
+  t.doc.querySelector('button[aria-label="Read aloud"]').dispatchEvent(click);await settle();
+  assert(!click.defaultPrevented,'unrecognized content swallowed native click');assert(t.clicks.join(',')==='one','native fallback did not run');
+ });
+ await check('Selecting the current response again retains a native restart path',async()=>{
+  const t=await tab(sharedStorage(false),{history:turn('one','A complete response.')});const button=t.doc.querySelector('button[aria-label="Read aloud"]');
+  button.click();await settle();t.publish('paused',{responseId:'one'});const click=new MouseEvent('click',{bubbles:true,cancelable:true});button.dispatchEvent(click);await settle();
+  assert(!click.defaultPrevented,'current response restart was swallowed');assert(t.clicks.join(',')==='one,one','native restart did not run');
  });
  for(const r of results){const li=document.createElement('li');li.className=r.pass?'pass':'fail';li.textContent=`${r.pass?'PASS':'FAIL'}: ${r.name}${r.error?' — '+r.error:''}`;document.getElementById('results').append(li);}
  document.getElementById('summary').textContent=`${results.filter(r=>r.pass).length}/${results.length} passed`;

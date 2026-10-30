@@ -37,10 +37,12 @@
         "src/js/aac-container.js",
         "src/js/media-timeline.js",
         "src/js/captured-playback.js",
+        "src/js/reading-queue.js",
         "src/js/content-script.js"
       ],
       "run_at": "document_start",
-      "world": "MAIN"
+      "world": "MAIN",
+      "css": ["src/css/player.css", "src/css/reading-queue.css"]
     }
   ],
   "manifest_version": 3,

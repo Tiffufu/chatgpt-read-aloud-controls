@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Quiet player regression checks</title>
+<style>body{font:14px system-ui}iframe{display:block;width:640px;max-width:100%;height:600px;border:1px solid #bbb}.pass{color:green}.fail{color:#b00020}</style>
+<h1>Quiet player regression checks</h1>
+<ol id="results"></ol>
+<iframe title="Production player" src="../../preview.html?ae-theme=light&amp;ae-duration=420&amp;ae-current=80&amp;ae-rate=2&amp;ae-back=1&amp;ae-forward=300&amp;ae-download=ready"></iframe>
+<script>
+const frame=document.querySelector('iframe');
+frame.addEventListener('load',()=>{
+    const doc=frame.contentDocument;
+    const check=(name,run)=>{
+        const row=document.createElement('li');
+        try{run();row.className='pass';row.textContent=`PASS ${name}`;}
+        catch(error){row.className='fail';row.textContent=`FAIL ${name}: ${error.message}`;}
+        document.querySelector('#results').append(row);
+    };
+    const assert=(value,message)=>{if(!value)throw new Error(message);};
+    check('Keyboard focus survives minimizing and expanding',()=>{
+        const button=doc.querySelector('[aria-label="Hide timeline"]');
+        button.focus();button.click();
+        assert(doc.activeElement===button,'Minimizing dropped focus');
+        assert(button.getAttribute('aria-label')==='Show timeline','Restore action missing');
+        button.click();
+        assert(doc.activeElement===button,'Expanding dropped focus');
+    });
+    // Restore expanded state even when the focus regression fails.
+    doc.querySelector('[aria-label="Show timeline"]')?.click();
+    check('Compact controls preserve transport and drawer preference',()=>{
+        const item=id=>({id,snippet:`Response ${id}`});
+        doc.dispatchEvent(new frame.contentWindow.CustomEvent('ae-read-aloud-player:queue',{
+            detail:{current:item('a'),items:[item('b'),item('c')],state:'playing'}
+        }));
+        const toggle=doc.querySelector('.ae-rq-toggle');toggle.click();
+        const panel=doc.querySelector('.ae-rq-panel');
+        const transport=doc.querySelector('.ae-transport');
+        assert(!panel.hidden&&toggle.textContent==='3','Current plus waiting count missing');
+        doc.querySelector('[aria-label="Hide timeline"]').click();
+        assert(panel.hidden&&toggle.hidden,'Compact player has expanded queue controls');
+        assert(doc.querySelector('.ae-transport')===transport,'Compact transport replaced');
+        assert(transport.textContent==='1300','Independent skip values changed');
+        doc.querySelector('[aria-label="Show timeline"]').click();
+        assert(!panel.hidden,'Drawer preference lost');
+        assert(doc.querySelector('.ae-transport')===transport,'Expanded transport replaced');
+    });
+});
+</script>
+</html>

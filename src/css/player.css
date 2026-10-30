@@ -1,0 +1,286 @@
+/* Main-world player presentation. Every selector is scoped to the extension root. */
+#ae_enhanced_player {
+    position:fixed;
+    top:24px;
+    left:50%;
+    transform:translateX(-50%);
+    z-index:2147483647;
+    width:min(560px,calc(100vw - 20px));
+    border:1px solid;
+    border-radius:14px;
+    box-sizing:border-box;
+    font:14px 'Segoe UI',sans-serif;
+    container-type:inline-size;
+}
+
+#ae_enhanced_player *, #ae_enhanced_player *::before, #ae_enhanced_player *::after {
+    box-sizing:border-box;
+}
+
+#ae_enhanced_player button {
+    appearance:none;
+    font:inherit;
+    color:inherit;
+    border:0;
+    background:transparent;
+    cursor:pointer;
+    margin:0;
+    text-transform:none;
+    letter-spacing:normal;
+}
+
+#ae_enhanced_player button:focus-visible, #ae_enhanced_player [role=button]:focus-visible {
+    outline:2px solid var(--ae-focus-ring);
+    outline-offset:2px;
+}
+
+#ae_enhanced_player button:disabled {
+    cursor:default;
+}
+
+#ae_enhanced_player .ae-player-header {
+    display:flex;
+    align-items:center;
+    gap:12px;
+    min-height:45px;
+    padding:9px 12px 0 16px;
+    border-radius:14px 14px 0 0;
+    cursor:move;
+    user-select:none;
+}
+
+#ae_enhanced_player .ae-player-title {
+    flex:1;
+    min-width:0;
+    overflow:hidden;
+    white-space:nowrap;
+    text-overflow:ellipsis;
+    font-size:14px;
+    font-weight:600;
+    line-height:1.3;
+    padding:5px 0;
+}
+
+#ae_enhanced_player .ae-window-controls {
+    display:flex;
+    flex:none;
+    gap:2px;
+    align-items:center;
+}
+
+#ae_enhanced_player .ae-window-controls button {
+    color:var(--ae-muted);
+}
+
+#ae_enhanced_player .ae-player-content {
+    display:grid;
+    gap:0;
+    padding:9px 16px 13px;
+    border-radius:0 0 14px 14px;
+}
+
+#ae_enhanced_player:has(.ae-rq-panel:not([hidden])) .ae-player-content {
+    border-radius:0;
+}
+
+#ae_enhanced_player .ae-listening-row {
+    display:grid;
+    grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);
+    align-items:center;
+    gap:6px;
+    min-height:50px;
+    margin-bottom:10px;
+}
+
+#ae_enhanced_player .ae-speed-group {
+    position:relative;
+    justify-self:start;
+    min-width:0;
+}
+
+#ae_enhanced_player .ae-speed-button {
+    min-width:35px;
+    min-height:36px;
+    padding:0 6px;
+    border-radius:6px;
+    font-size:13px;
+    font-weight:600;
+}
+
+#ae_enhanced_player .ae-transport {
+    display:flex;
+    flex:none;
+    align-items:center;
+    justify-content:center;
+    gap:10px;
+}
+
+#ae_enhanced_player .ae-transport button {
+    position:relative;
+}
+
+#ae_enhanced_player .ae-transport button[data-icon-name=backward], #ae_enhanced_player .ae-transport button[data-icon-name=forward] {
+    color:var(--ae-muted);
+}
+
+#ae_enhanced_player .ae-skip-value {
+    position:absolute;
+    left:0;
+    right:0;
+    top:13px;
+    line-height:10px;
+    font-size:10px;
+    font-weight:600;
+    letter-spacing:-.4px;
+    font-variant-numeric:tabular-nums;
+    text-align:center;
+    pointer-events:none;
+}
+
+#ae_enhanced_player .ae-utilities {
+    display:flex;
+    align-items:center;
+    justify-content:flex-end;
+    gap:2px;
+    color:var(--ae-muted);
+}
+
+#ae_enhanced_player .ae-time-labels {
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    min-height:16px;
+    line-height:16px;
+    font-size:11px;
+    font-variant-numeric:tabular-nums;
+}
+
+#ae_enhanced_player .ae-duration {
+    text-align:right;
+}
+
+#ae_enhanced_player .ae-seek-status {
+    grid-column:1/-1;
+    font-size:11px;
+}
+
+#ae_enhanced_player .ae_seek_bar {
+    --ae-seek-progress:0%;
+    appearance:none;
+    -webkit-appearance:none;
+    background:linear-gradient(to right,var(--ae-seek-track-elapsed) 0%,var(--ae-seek-track-elapsed) var(--ae-seek-progress),var(--ae-seek-track-remaining) var(--ae-seek-progress),var(--ae-seek-track-remaining) 100%) center/100% 4px no-repeat;
+    cursor:pointer;
+    direction:ltr;
+    height:20px;
+    margin:0;
+    border:0;
+    border-radius:999px;
+    width:100%;
+    min-width:0;
+    padding:0;
+}
+
+#ae_enhanced_player .ae_seek_bar::-webkit-slider-runnable-track {
+    background:transparent;
+    border:0;
+    border-radius:999px;
+    height:4px;
+}
+
+#ae_enhanced_player .ae_seek_bar::-webkit-slider-thumb {
+    appearance:none;
+    -webkit-appearance:none;
+    background:var(--ae-seek-thumb);
+    border:1px solid var(--ae-seek-thumb-border);
+    border-radius:50%;
+    height:12px;
+    width:12px;
+    margin-top:-4px;
+}
+
+#ae_enhanced_player .ae_seek_bar:focus-visible {
+    outline:2px solid var(--ae-focus-ring);
+    outline-offset:2px;
+}
+
+#ae_enhanced_player .ae_seek_bar::-moz-range-track {
+    background:transparent;
+    border:0;
+    border-radius:999px;
+    height:4px;
+}
+
+#ae_enhanced_player .ae_seek_bar::-moz-range-progress {
+    background:var(--ae-seek-track-elapsed);
+    height:4px;
+}
+
+#ae_enhanced_player .ae_seek_bar::-moz-range-thumb {
+    background:var(--ae-seek-thumb);
+    border:1px solid var(--ae-seek-thumb-border);
+    border-radius:50%;
+    height:12px;
+    width:12px;
+}
+
+#ae_enhanced_player[data-collapsed=true] .ae-player-header {
+    min-height:50px;
+    padding:7px 10px 7px 14px;
+    gap:6px;
+}
+
+#ae_enhanced_player[data-collapsed=true] .ae-player-title {
+    font-size:13px;
+}
+
+#ae_enhanced_player[data-collapsed=true] .ae-transport {
+    gap:4px;
+}
+
+@container (max-width:360px) {
+    #ae_enhanced_player .ae-transport {
+        gap:3px;
+    }
+    #ae_enhanced_player .ae-listening-row {
+        gap:3px;
+    }
+    #ae_enhanced_player .ae-utilities {
+        gap:0;
+    }
+    #ae_enhanced_player .ae-player-content {
+        padding-left:12px;
+        padding-right:12px;
+    }
+    #ae_enhanced_player[data-collapsed=true] .ae-player-header {
+        gap:2px;
+        padding-left:10px;
+        padding-right:6px;
+    }
+    #ae_enhanced_player[data-collapsed=true] .ae-transport {
+        gap:0;
+    }
+}
+
+@container (max-width:300px) {
+    #ae_enhanced_player .ae-listening-row {
+        grid-template-columns:1fr 1fr;
+        gap:3px;
+    }
+    #ae_enhanced_player .ae-transport-slot {
+        grid-column:1/-1;
+        grid-row:1;
+    }
+    #ae_enhanced_player .ae-speed-group {
+        grid-column:1;
+        grid-row:2;
+    }
+    #ae_enhanced_player .ae-utilities {
+        grid-column:2;
+        grid-row:2;
+    }
+}
+
+@media(prefers-reduced-motion:reduce) {
+    #ae_enhanced_player button {
+        transition:none!important;
+    }
+}

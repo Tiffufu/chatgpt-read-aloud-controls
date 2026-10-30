@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Reading queue UI tests</title><link rel="stylesheet" href="../../src/css/reading-queue.css">
+<style>body{font:14px system-ui;margin:24px;background:#202123;color:#f3f0e9}#fixture{max-width:560px}li{margin:8px 0}.fail{color:#ffb4ae}.pass{color:#a8dbb9}</style>
+<h1>Reading queue UI tests</h1><p id="summary">Running…</p><ol id="results"></ol><div id="fixture"></div>
+<script src="../../src/js/reading-queue.js"></script>
+<script>
+(()=>{
+const results=[];const assert=(v,m)=>{if(!v)throw Error(m);};function check(name,fn){try{fn();results.push({name,pass:true});}catch(e){results.push({name,pass:false,error:e.message});}}
+const theme={playerSurface:'#28292b',playerBorder:'rgba(255,255,255,.16)',playerText:'#f3f0e9',secondaryText:'#c4c7cc',controlHoverBackground:'rgba(255,255,255,.10)',focusRing:'#b0d6bd'};
+let ui,container,toggleHost;const commands=[];
+const item=(id,snippet=id)=>({id,revision:0,signature:id,snippet,source:'manual'});
+let state={items:[item('one','Yes. Here is enough context to identify this response.'),item('two','<img src=x onerror=alert(1)>')],current:item('current','Your current response keeps playing.'),state:'playing',canUndo:false,error:'',suspended:false};
+check('Mount and show the real attached drawer',()=>{
+ container=document.createElement('div');container.id='ae_enhanced_player';toggleHost=document.createElement('div');container.append(toggleHost);document.getElementById('fixture').append(container);
+ assert(window.AEPlayerReadingQueue?.create,'queue UI module missing');ui=AEPlayerReadingQueue.create({document,container,toggleHost,onCommand:value=>commands.push(value)});ui.setTheme(theme);ui.update(state);
+ assert(container.querySelector('.ae-rq-panel'),'drawer missing');container.querySelector('.ae-rq-toggle').click();assert(!container.querySelector('.ae-rq-panel').hidden,'drawer did not open');
+ assert(container.querySelector('.ae-rq-count').textContent==='3','total must include the current response');
+ ui.update({...state,items:[]});assert(container.querySelector('.ae-rq-count').textContent==='1','current response was not counted');assert(container.querySelector('.ae-rq-empty').textContent.startsWith('Nothing else queued.'),'empty copy is misleading while playing');assert(container.querySelector('.ae-rq-current').textContent===state.current.snippet,'current message disappeared');ui.update(state);
+});
+check('Queue button keeps symmetric padding and fits its icon plus total',()=>{
+ const button=container.querySelector('.ae-rq-toggle');const s=getComputedStyle(button);assert(s.paddingLeft===s.paddingRight&&button.getBoundingClientRect().width>=36,'asymmetric padding');assert(button.scrollWidth<=button.clientWidth,'button contents overflow');
+});
+check('Minimize remembers both open and closed drawer preferences',()=>{
+ ui.setCollapsed(true);assert(container.querySelector('.ae-rq-panel').hidden,'minimize left drawer open');ui.setCollapsed(false);assert(!container.querySelector('.ae-rq-panel').hidden,'lost open preference');
+ container.querySelector('.ae-rq-toggle').click();ui.setCollapsed(true);ui.setCollapsed(false);assert(container.querySelector('.ae-rq-panel').hidden,'lost closed preference');container.querySelector('.ae-rq-toggle').click();
+});
+check('Message labels are safe text and clicking them only asks to reveal the source',()=>{
+ assert(!container.querySelector('img'),'message HTML was interpreted');const button=container.querySelector('.ae-rq-message');button.click();assert(commands.at(-1).action==='reveal'&&commands.at(-1).id==='one','wrong source command');
+});
+check('Arrows removal clear and Undo send semantic queue commands',()=>{
+ container.querySelector('[aria-label="Move down: Yes. Here is enough context to identify this response."]').click();assert(commands.at(-1).direction===1&&commands.at(-1).action==='move','wrong move command');
+ container.querySelector('[aria-label="Remove: Yes. Here is enough context to identify this response."]').click();assert(commands.at(-1).action==='remove','wrong remove command');
+ container.querySelector('.ae-rq-clear').click();assert(commands.at(-1).action==='clear','wrong clear command');ui.update({...state,items:[],canUndo:true});container.querySelector('.ae-rq-undo').click();assert(commands.at(-1).action==='undo','wrong undo command');
+});
+check('Repeated snapshots preserve focused controls and errors are actionable',()=>{
+ ui.update(state);const button=container.querySelector('.ae-rq-message');button.focus();ui.update({...state,items:[...state.items].reverse()});assert(document.activeElement?.getAttribute('aria-label')===button.getAttribute('aria-label'),'focus was lost');
+ ui.update({...state,suspended:true,error:'Read Aloud could not start.'});assert(container.querySelector('.ae-rq-error').textContent.includes('could not start'),'error missing');container.querySelector('.ae-rq-retry').click();assert(commands.at(-1).action==='retry','retry unavailable');
+});
+check('Dragging accepts a drop and sends the selected source and target',()=>{
+ ui.update(state);const transfer=new DataTransfer();const rows=container.querySelectorAll('.ae-rq-row');
+ rows[1].querySelector('.ae-rq-handle').dispatchEvent(new DragEvent('dragstart',{bubbles:true,dataTransfer:transfer}));
+ const over=new DragEvent('dragover',{bubbles:true,cancelable:true,dataTransfer:transfer});rows[0].dispatchEvent(over);
+ assert(over.defaultPrevented,'drag target did not accept a drop');
+ rows[0].dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:transfer}));
+ assert(commands.at(-1).action==='reorder'&&commands.at(-1).id==='two'&&commands.at(-1).targetId==='one','wrong drag reorder command');
+});
+check('Finished and interrupted responses have unambiguous totals',()=>{
+ ui.update({...state,items:[],state:'ended'});assert(container.querySelector('.ae-rq-count').hidden,'finished response counted');assert(container.querySelector('.ae-rq-now').hidden,'finished response still current');
+ ui.update({...state,state:'error',current:state.items[0],suspended:true});assert(container.querySelector('.ae-rq-count').textContent==='2','retry entry counted twice');assert(container.querySelectorAll('.ae-rq-row').length===1,'current retry duplicated in waiting list');ui.update(state);
+});
+check('Snapshots during a drag preserve its source until the gesture ends',()=>{
+ ui.update(state);const handle=container.querySelector('.ae-rq-handle'),transfer=new DataTransfer();handle.dispatchEvent(new DragEvent('dragstart',{bubbles:true,dataTransfer:transfer}));
+ ui.update({...state,items:[...state.items,item('three','A newly arriving response.')]});assert(container.querySelector('.ae-rq-handle')===handle,'snapshot replaced the active drag source');
+ handle.dispatchEvent(new DragEvent('dragend',{bubbles:true,dataTransfer:transfer}));assert(container.querySelectorAll('.ae-rq-row').length===3,'arrival was lost at drag end');ui.update(state);
+});
+check('Destroy removes controls and supports recreating a player',()=>{ui.destroy();assert(!container.querySelector('.ae-rq-toggle')&&!container.querySelector('.ae-rq-panel'),'destroy leaked UI');});
+for(const r of results){const li=document.createElement('li');li.className=r.pass?'pass':'fail';li.textContent=`${r.pass?'PASS':'FAIL'}: ${r.name}${r.error?' — '+r.error:''}`;document.getElementById('results').append(li);}document.getElementById('summary').textContent=`${results.filter(r=>r.pass).length}/${results.length} passed`;document.documentElement.dataset.testResult=results.every(r=>r.pass)?'passed':'failed';
+})();
+</script></html>

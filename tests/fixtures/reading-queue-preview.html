@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Reading queue preview - ChatGPT</title><link rel="stylesheet" href="../../src/css/player.css"><link rel="stylesheet" href="../../src/css/reading-queue.css">
+<style>
+body{margin:0;background:#202123;color:#f3f0e9;font:14px/1.6 system-ui,sans-serif}main{max-width:650px;margin:540px auto 60px;padding:0 22px}h1{font-size:22px;margin-bottom:4px}p{color:#c4c7cc}button{font:inherit;color:inherit;background:transparent;border:1px solid #62666b;border-radius:8px;padding:7px 12px;cursor:pointer}button:hover{background:#ffffff12}.tools{display:flex;gap:8px;flex-wrap:wrap;margin:18px 0 30px}.message{padding:20px 0;border-bottom:1px solid #ffffff22}.message button{font-size:12px;margin-top:8px}.message .markdown{margin-top:5px}.speaker{font-size:12px;font-weight:600;color:#c4c7cc}.composer{display:none}.light{background:#fff;color:#1f1f1f}.light p,.light .speaker{color:#5f6368}.light button{border-color:#a7aaad}.light .message{border-color:#0002}
+</style>
+<script>
+// Local-only service boundary: real player/controller, synthetic silent media.
+window.chrome={runtime:{id:'local-preview',onMessage:{addListener(){}}},storage:{local:{get:async()=>({ae_player_settings:{autoReadAloud:true}})},onChanged:{addListener(){}}}};
+const originalFetch=window.fetch.bind(window);
+const previewAudio=new Set();const nativePlay=HTMLMediaElement.prototype.play;
+HTMLMediaElement.prototype.play=function(...args){previewAudio.add(this);return nativePlay.apply(this,args);};
+function silentWave(){
+ const samples=8000*90;const bytes=new Uint8Array(44+samples*2);const view=new DataView(bytes.buffer);const label=(at,text)=>{for(let i=0;i<text.length;i++)bytes[at+i]=text.charCodeAt(i);};
+ label(0,'RIFF');view.setUint32(4,bytes.length-8,true);label(8,'WAVE');label(12,'fmt ');view.setUint32(16,16,true);view.setUint16(20,1,true);view.setUint16(22,1,true);view.setUint32(24,8000,true);view.setUint32(28,16000,true);view.setUint16(32,2,true);view.setUint16(34,16,true);label(36,'data');view.setUint32(40,samples*2,true);return bytes;
+}
+window.fetch=(input,options)=>String(input).includes('/backend-api/synthesize')?Promise.resolve(new Response(silentWave(),{headers:{'content-type':'audio/wav'}})):originalFetch(input,options);
+</script>
+</head>
+<body>
+<main><h1>Reading queue · working preview</h1><p>The extension’s actual player and queue, using silent sample audio. Select another response while one is playing to queue it.</p>
+<div class="tools"><button id="sample">Start sample queue</button><button id="incoming">New response arrives</button><button id="finish">Finish current message</button><button id="theme">Light theme</button><button id="reset">Reset preview</button></div>
+<div data-message-id="user-1" data-message-author-role="user" hidden>Let’s try the reading queue.</div><div id="conversation"></div>
+<div class="composer"><textarea id="prompt-textarea" placeholder="Ask anything"></textarea><button aria-label="Send">Send</button></div>
+</main>
+<script src="../../src/js/player-settings.js"></script><script src="../../src/js/aac-container.js"></script><script src="../../src/js/media-timeline.js"></script><script src="../../src/js/captured-playback.js"></script><script src="../../src/js/reading-queue.js"></script><script src="../../src/js/content-script.js"></script>
+<script>
+let pageAudio=null;let pageObjectUrl=null;let number=0;let theme='dark';
+const examples=[
+ 'A reading queue can stay small and easy to manage. Keep the player familiar, then reveal upcoming messages only when you need them.',
+ 'Yes. The queue can stay in this extension without making the player feel crowded. Keep the everyday controls easy to reach.',
+ 'Dude, the whole point is to keep listening while new responses come in and still be able to move things around without losing your place in the conversation.',
+ 'Each tab keeps its own independent reading list. Select an older response whenever you want to hear it next.'
+];
+function addResponse(text){
+ const article=document.createElement('article');article.className='message';article.dataset.messageId=`sample-${++number}`;article.dataset.messageAuthorRole='assistant';
+ const label=document.createElement('div');label.className='speaker';label.textContent='ChatGPT';const body=document.createElement('div');body.className='markdown';body.textContent=text;
+ const read=document.createElement('button');read.setAttribute('aria-label','Read aloud');read.setAttribute('aria-pressed','false');read.textContent='Read aloud';
+ read.addEventListener('click',async()=>{
+  if(read.getAttribute('aria-pressed')==='true'){pageAudio?.pause();read.setAttribute('aria-pressed','false');return;}
+  const response=await fetch('/backend-api/synthesize');const blob=await response.blob();
+  if(pageAudio){pageAudio.pause();pageAudio.removeAttribute('src');pageAudio.load();}
+  if(pageObjectUrl)URL.revokeObjectURL(pageObjectUrl);
+  document.querySelectorAll('[aria-pressed="true"]').forEach(node=>node.setAttribute('aria-pressed','false'));
+  const next=document.createElement('audio');pageAudio=next;next.muted=true;pageObjectUrl=URL.createObjectURL(blob);next.src=pageObjectUrl;next.preload='auto';
+  next.addEventListener('ended',()=>read.setAttribute('aria-pressed','false'));
+  await next.play();read.setAttribute('aria-pressed','true');
+ });
+ article.append(label,body,read);document.getElementById('conversation').append(article);return read;
+}
+examples.forEach(addResponse);
+document.getElementById('sample').onclick=()=>{
+ const buttons=document.querySelectorAll('[aria-label="Read aloud"]');buttons[0].click();buttons[1].click();buttons[2].click();buttons[3].click();
+};
+document.getElementById('incoming').onclick=()=>{
+ document.getElementById('prompt-textarea').value='A sample new prompt';document.querySelector('[aria-label="Send"]').click();
+ const user=document.createElement('div');user.dataset.messageAuthorRole='user';user.dataset.messageId=`user-${number+1}`;user.hidden=true;user.textContent='Another sample prompt';document.getElementById('conversation').append(user);
+ addResponse('Here is a new response, waiting its turn. It joins the end without interrupting what you are listening to.');
+};
+document.getElementById('finish').onclick=()=>{previewAudio.forEach(a=>{if(!a.paused&&Number.isFinite(a.duration))a.currentTime=Math.max(0,a.duration-.02);});};
+document.getElementById('theme').onclick=()=>{theme=theme==='dark'?'light':'dark';document.body.classList.toggle('light',theme==='light');document.getElementById('theme').textContent=theme==='dark'?'Light theme':'Dark theme';document.dispatchEvent(new CustomEvent('ae-read-aloud-player:settings',{detail:{settings:{theme,autoReadAloud:true}}}));};
+document.getElementById('reset').onclick=()=>location.reload();
+document.dispatchEvent(new CustomEvent('ae-read-aloud-player:settings',{detail:{settings:{theme,autoReadAloud:true}}}));
+</script>
+<script src="../../src/js/auto-read-aloud.js"></script>
+</body></html>

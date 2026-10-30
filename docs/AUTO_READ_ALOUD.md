@@ -15,14 +15,26 @@ new permissions, services, or dependencies.
   including manually started and paused playback.
 - The queue advances on actual completion of the authoritative audio owner.
   Buffer completion and the handoff to captured playback do not advance it.
-- Closing the player clears that tab's queue. Disabling automatic reading clears
-  pending work in every tab while preserving audio already playing.
-- Manual Read Aloud takes precedence and satisfies a matching queued response.
+- Closing the player clears that tab's queue. Disabling automatic reading removes
+  automatic entries in every tab while preserving explicit selections and playing audio.
+- Selecting another completed message's Read Aloud adds it to the queue, including
+  when automatic reading is disabled. Duplicate selections are ignored. The current
+  response's pressed native control can still perform its native stop action.
+- The attached drawer shows the current response and ordered upcoming snippets.
+  Its oval toggle sits beside Download. Drag or arrow buttons reorder entries;
+  Remove and Clear upcoming support one-level Undo for valid responses. Source
+  previews scroll to and briefly highlight their original messages.
+- Minimizing hides the drawer while retaining its expansion preference. The drawer
+  starts closed and retains its preference through player-session rebuilds.
+- Queue progression keeps the same player mounted. While the next response's audio
+  element is being created, playback controls are temporarily disabled and show
+  `Starting next response`; position and minimized/drawer state are preserved.
 - Navigation and reload discard pending work. Assigning the first conversation
   URL to a new chat preserves its pending generation/start.
 - An unavailable native control or missing playback confirmation suspends that
-  tab's queue after 15 seconds. The popup's existing status area explains how to
-  recover by starting Read Aloud manually or toggling automatic reading.
+  tab's queue after 15 seconds. The drawer and popup show the failure; Retry
+  restarts the pending response. Playback errors restore the interrupted response
+  ahead of later entries. Clearing a failed queue releases its suspension.
 
 ## Runtime boundary
 
@@ -32,6 +44,12 @@ owns eligibility, revisions, FIFO ordering, cancellation, and timeouts. It click
 the native response action. The current main-world player still owns media and
 builds its floating controls through the existing playback path.
 
+`reading-queue.js` is a separate main-world presentation module. It receives only
+bounded value snapshots, sends commands, and never starts audio or scans ChatGPT.
+The controller exposes explicit admission and editing operations. Native clicks
+are deferred to a cancellable microtask because a browser suppresses a reentrant
+`.click()` on the button whose user click is being intercepted.
+
 The private DOM event contract is:
 
 | Event | Detail | Purpose |
@@ -40,6 +58,14 @@ The private DOM event contract is:
 | `ae-read-aloud-player:playback` | `{sessionId, responseId, requestId, state, reason}` | Report starting, playing, paused, ended, closed, or error. |
 | `ae-read-aloud-player:playback-intent` | `{responseId, requestId}` | Correlate native synthesis with a response and automatic attempt; manual attempts have a null request ID. |
 | `ae-read-aloud-player:playback-cancel` | `{requestId}` | Cancel an automatic attempt still waiting to start. |
+| `ae-read-aloud-player:queue-request` | none | Request the latest queue snapshot. |
+| `ae-read-aloud-player:queue` | `{items,current,state,suspended,error,canUndo,enabled}` | Publish serializable queue/current state. |
+| `ae-read-aloud-player:queue-command` | `{action,id?,direction?,targetId?}` | Remove, move, reorder, clear, undo, retry, or reveal a source. |
+
+Snapshots retain IDs, revision/signature tokens, source, and snippets capped around
+104 Unicode code points plus an ellipsis. Full response bodies, DOM nodes, and
+prefetched media are never copied into the queue snapshot. Queues and Undo remain
+in memory in one tab; navigation, close, reload, and extension invalidation clear them.
 
 Stale session events and events from non-owner audio elements are ignored.
 Lifecycle listeners operate in background tabs independently of UI refresh.

@@ -411,8 +411,19 @@ class FakeElement {
 
     appendChild(child) {
         if (!child) return child;
+        child.remove?.();
         child.parentNode = this;
         this.children.push(child);
+        return child;
+    }
+
+    insertBefore(child, reference) {
+        if (!reference) return this.appendChild(child);
+        child.remove?.();
+        const index = this.children.indexOf(reference);
+        if (index < 0) throw new Error('Reference is not a child');
+        child.parentNode = this;
+        this.children.splice(index, 0, child);
         return child;
     }
 
@@ -625,6 +636,11 @@ const findElement = (root, predicate) => {
     return null;
 };
 
+// Each VM represents a fresh page; do not chain hooks from an earlier page VM.
+const originalHarnessPlay = FakeMediaElement.prototype.play;
+const originalHarnessPause = FakeMediaElement.prototype.pause;
+const originalHarnessCreateElement = FakeDocument.prototype.createElement;
+
 const flushMicrotasks = async () => {
     for (let index = 0; index < 12; index += 1) await Promise.resolve();
 };
@@ -635,8 +651,12 @@ const createContentScriptHarness = ({
     capturedSeekable = [[0, capturedDuration]],
     captureBytes = new Uint8Array([1, 2, 3]),
     deferCaptureCompletion = false,
+    fetchFailure = null,
     now = () => Date.now()
 } = {}) => {
+    FakeMediaElement.prototype.play = originalHarnessPlay;
+    FakeMediaElement.prototype.pause = originalHarnessPause;
+    FakeDocument.prototype.createElement = originalHarnessCreateElement;
     const mediaTimeline = loadMediaTimeline();
     const capturedPlayback = loadCapturedPlayback();
     const document = new FakeDocument();
@@ -691,7 +711,10 @@ const createContentScriptHarness = ({
         clearTimeout,
         console,
         document,
-        fetch: async () => createResponse(),
+        fetch: async () => {
+            if (fetchFailure) throw fetchFailure;
+            return createResponse();
+        },
         innerHeight: 900,
         innerWidth: 1440,
         localStorage: {
@@ -1205,6 +1228,50 @@ test('second speech response releases the old captured owner without pausing pag
     assert.equal(harness.revokedPlaybackUrls[0], 'blob:captured-playback-1');
 });
 
+test('queued response handoff keeps the same player mounted while waiting for the next audio element', async () => {
+    const harness = createContentScriptHarness();
+    await harness.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    const firstAudio = harness.createAudio('blob:first-response', { seekable: [[0, 420]] });
+    await firstAudio.play();
+    await harness.flushMicrotasks();
+    const player = harness.context.document.getElementById('ae_enhanced_player');
+    player.style.left = '88px';
+    player.style.top = '140px';
+    harness.findButton('Hide timeline').click();
+
+    // Capture for the next response can finish before ChatGPT creates its audio.
+    await harness.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    await harness.flushMicrotasks();
+    await harness.runIntervals();
+    assert.equal(harness.context.document.getElementById('ae_enhanced_player'), player);
+    assert.ok(harness.findButton('Starting next response'));
+    assert.equal(harness.findButton('Starting next response').disabled, true);
+    assert.ok(harness.findButton('Show timeline'));
+
+    const nextAudio = harness.createAudio('blob:next-response', { seekable: [[0, 420]] });
+    await nextAudio.play();
+    await harness.flushMicrotasks();
+    await harness.runIntervals();
+    assert.equal(harness.context.document.getElementById('ae_enhanced_player'), player);
+    assert.equal(player.style.left, '88px');
+    assert.equal(player.style.top, '140px');
+    assert.ok(harness.findButton('Show timeline'));
+    assert.ok(harness.findButton('Pause'));
+});
+
+test('losing the source of an already bound owner still removes the player', async () => {
+    const harness = createContentScriptHarness();
+    await harness.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    const pageAudio = harness.createAudio('blob:response', { seekable: [[0, 420]] });
+    await pageAudio.play();
+    await harness.flushMicrotasks();
+    assert.ok(harness.context.document.getElementById('ae_enhanced_player'));
+    pageAudio.src = '';
+    pageAudio.currentSrc = '';
+    await harness.runIntervals();
+    assert.equal(harness.context.document.getElementById('ae_enhanced_player'), null);
+});
+
 test('late captured readiness cannot reopen a closed player or mutate a replacement session', async () => {
     const harness = createContentScriptHarness({ capturedPlaybackMode: 'loading' });
     await harness.context.fetch('https://chatgpt.com/backend-api/synthesize');
@@ -1521,7 +1588,8 @@ test('a same-millisecond response cannot reclaim audio that played before the se
     await harness.flushMicrotasks();
     await harness.runIntervals();
 
-    assert.equal(harness.context.document.getElementById('ae_enhanced_player'), null);
+    assert.equal(harness.findButton('Starting next response').disabled, true);
+    assert.equal(harness.findButton('Skip back 15 seconds').disabled, true);
     assert.equal(firstAudio.pauseCalls, 0);
 });
 
@@ -1530,6 +1598,57 @@ const listenToPlayback = (harness) => {
     harness.context.document.addEventListener('ae-read-aloud-player:playback', event => states.push(event.detail));
     return states;
 };
+
+test('a stopped owner losing its source releases the queue from paused without discarding upcoming messages', async () => {
+    const h = createContentScriptHarness();
+    const starts = [];
+    const { createAutoReadController } = require('../src/js/auto-read-aloud.js');
+    const controller = createAutoReadController({ start: item => { starts.push(item.id); return true; } });
+    controller.setEnabled(true, {
+        conversation: '/c/test', userKey: 'user', generating: false,
+        turns: ['a', 'b'].map(id => ({ id, signature: id, hasText: true, state: 'complete' }))
+    });
+    const states = listenToPlayback(h);
+    h.context.document.addEventListener('ae-read-aloud-player:playback', event => controller.playback(event.detail));
+    h.context.document.dispatchEvent(new h.context.CustomEvent('ae-read-aloud-player:playback-intent', {
+        detail: { responseId: 'a', requestId: null }
+    }));
+    await h.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    const audio = h.createAudio('blob:stopped-owner', { seekable: [[0, 420]] });
+    await audio.play();
+    await h.flushMicrotasks();
+    controller.enqueue('b');
+    audio.pause();
+    audio.dispatchEvent({ type: 'pause' });
+    audio.src = '';
+    audio.currentSrc = '';
+    await h.runIntervals();
+
+    assert.equal(h.context.document.getElementById('ae_enhanced_player'), null);
+    assert.equal(states.at(-1).state, 'error');
+    assert.equal(states.at(-1).reason, 'media-source-unavailable');
+    assert.equal(controller.getSnapshot().state, 'error');
+    assert.deepEqual(controller.getSnapshot().items.map(item => item.id), ['b']);
+    controller.manualStart('a');
+    controller.playback({ state: 'playing', sessionId: 2, responseId: 'a', requestId: null });
+    controller.playback({ state: 'ended', sessionId: 2, responseId: 'a', requestId: null });
+    assert.deepEqual(starts, ['b']);
+    controller.dispose();
+});
+
+test('failed native requests report their response identity on every manual retry', async () => {
+    const h = createContentScriptHarness({ fetchFailure: new Error('Network failure') });
+    const states = listenToPlayback(h);
+    for (let retry = 0; retry < 2; retry += 1) {
+        h.context.document.dispatchEvent(new h.context.CustomEvent('ae-read-aloud-player:playback-intent', {
+            detail: { responseId: 'manual-answer', requestId: null }
+        }));
+        await assert.rejects(h.context.fetch('https://chatgpt.com/backend-api/synthesize'), /Network failure/);
+    }
+    assert.equal(states.filter(value => value.state === 'error').length, 2);
+    assert.equal(states.at(-1).responseId, 'manual-answer');
+    assert.equal(states.at(-1).reason, 'request-failed');
+});
 
 test('playback lifecycle reports native start and completion even in a hidden tab', async () => {
     const h = createContentScriptHarness();
@@ -1641,4 +1760,53 @@ test('completed capture cannot start its delayed page audio after cancellation',
     const audio=h.createAudio('blob:late-page-audio');
     await assert.rejects(audio.play(),{name:'AbortError'});
     assert.equal(states.some(s=>s.requestId==='auto-late'&&s.state==='playing'),false);
+});
+
+test('numeric skip values follow independent settings without changing transport identity', async () => {
+    const h = createContentScriptHarness();
+    await h.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    await h.createAudio('blob:quiet-player', { duration: 420, seekable: [[0, 420]] }).play();
+    await h.flushMicrotasks();
+    const back = h.findButton('Skip back 15 seconds');
+    const forward = h.findButton('Skip forward 15 seconds');
+    assert.equal(back.textContent, '15');
+    assert.equal(forward.textContent, '15');
+    h.context.document.dispatchEvent(new h.context.CustomEvent('ae-read-aloud-player:settings', {
+        detail: { settings: { skipBackSeconds: 1, skipForwardSeconds: 300 } }
+    }));
+    assert.equal(h.findButton('Skip back 1 second'), back);
+    assert.equal(h.findButton('Skip forward 300 seconds'), forward);
+    assert.equal(back.textContent, '1');
+    assert.equal(forward.textContent, '300');
+    const transport = back.parentNode;
+    const expandedParent = transport.parentNode;
+    h.findButton('Hide timeline').click();
+    assert.notEqual(transport.parentNode, expandedParent);
+    assert.equal(h.findButton('Skip forward 300 seconds'), forward);
+    h.findButton('Show timeline').click();
+    assert.equal(transport.parentNode, expandedParent);
+    assert.equal(h.findButton('Skip back 1 second'), back);
+    await h.runIntervals();
+    await h.runIntervals();
+    assert.equal(back.textContent, '1', 'periodic state refresh must not duplicate the numeral');
+});
+
+test('split timeline keeps rate-adjusted labels and a stable disabled loading track', async () => {
+    const h = createContentScriptHarness({ deferCaptureCompletion: true });
+    await h.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    const audio = h.createAudio('blob:quiet-player');
+    await audio.play();
+    await h.flushMicrotasks();
+    const seek = h.findPlayerElement(e => e.tagName === 'INPUT' && e.type === 'range');
+    assert.equal(seek.style.display, 'block');
+    assert.equal(seek.disabled, true);
+    assert.equal(h.findPlayerElement(e => e.textContent === '/'), null);
+    audio.duration = 420;
+    audio.currentTime = 80;
+    audio.seekable = createTimeRanges([[0, 420]]);
+    h.context.document.dispatchEvent(new h.context.CustomEvent('ae-read-aloud-player:settings', {
+        detail: { settings: { playbackRate: 2 } }
+    }));
+    assert.ok(h.findPlayerElement(e => e.textContent === '0:40'));
+    assert.ok(h.findPlayerElement(e => e.textContent === '3:30'));
 });

@@ -26,6 +26,12 @@
     let speedMenu = null;
     let minimizeBtn = null;
     let timesRowDiv = null;
+    let playbackGroupDiv = null;
+    let expandedTransportDiv = null;
+    let windowButtonsDiv = null;
+    let queueUi = null;
+    let queueDrawerExpanded = false;
+    let queueSnapshot = { items: [], current: null, state: 'closed' };
     let monitorIntervalId = null;
     let uiSyncIntervalId = null;
     let audioTrackingInstalled = false;
@@ -228,21 +234,24 @@
         return error;
     };
 
-    const publishPlaybackState = (state, reason = '', force = false) => {
+    const publishPlaybackState = (state, reason = '', force = false, intent = null) => {
         const currentAudio = playerSession.audioElement;
+        const sourceUnavailable = currentAudio && !hasElementSource(currentAudio);
         const resolved = state || (playerSession.isClosed || playerSession.id === 0 ? 'closed'
+            : sourceUnavailable ? 'error'
             : currentAudio?.ended ? 'ended'
                 : currentAudio ? (currentAudio.paused ? 'paused' : 'playing') : 'starting');
-        const key = `${playerSession.id}:${resolved}:${reason}`;
+        const resolvedReason = reason || (resolved === 'error' && sourceUnavailable ? 'media-source-unavailable' : '');
+        const key = `${playerSession.id}:${resolved}:${resolvedReason}`;
         if (!force && key === lastPlaybackState) return;
         lastPlaybackState = key;
         document.dispatchEvent(new CustomEvent('ae-read-aloud-player:playback', {
             detail: {
                 sessionId: playerSession.id,
-                responseId: playerSession.responseId,
-                requestId: playerSession.requestId,
+                responseId: intent ? intent.responseId : playerSession.responseId,
+                requestId: intent ? intent.requestId : playerSession.requestId,
                 state: resolved,
-                reason
+                reason: resolvedReason
             }
         }));
     };
@@ -424,18 +433,16 @@
         collapse: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="size-6"><path stroke-linecap="round" stroke-linejoin="round" d="m5 15 7-7 7 7" /></svg>',
         expand: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="size-6"><path stroke-linecap="round" stroke-linejoin="round" d="m19 9-7 7-7-7" /></svg>',
         close: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="size-6"><path stroke-linecap="round" stroke-linejoin="round" d="M6 6l12 12M18 6 6 18" /></svg>',
-        backward: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="size-6"><path stroke-linecap="round" stroke-linejoin="round" d="m11 18-6-6 6-6v12Zm8 0-6-6 6-6v12Z" /></svg>',
+        backward: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M224,128a96,96,0,0,1-94.71,96H128A95.38,95.38,0,0,1,62.1,197.8a8,8,0,0,1,11-11.63A80,80,0,1,0,71.43,71.39a3.07,3.07,0,0,1-.26.25L44.59,96H72a8,8,0,0,1,0,16H24a8,8,0,0,1-8-8V56a8,8,0,0,1,16,0V85.8L60.25,60A96,96,0,0,1,224,128Z"/></svg>',
         play: '<svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24" class="size-6"><path d="M8.5 5.8v12.4c0 .8.9 1.3 1.6.9l9.2-6.2c.6-.4.6-1.4 0-1.8L10.1 4.9c-.7-.4-1.6.1-1.6.9Z" /></svg>',
         pause: '<svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24" class="size-6"><path d="M7.5 5.25c0-.69.56-1.25 1.25-1.25h1.5c.69 0 1.25.56 1.25 1.25v13.5c0 .69-.56 1.25-1.25 1.25h-1.5c-.69 0-1.25-.56-1.25-1.25V5.25Zm5 0c0-.69.56-1.25 1.25-1.25h1.5c.69 0 1.25.56 1.25 1.25v13.5c0 .69-.56 1.25-1.25 1.25h-1.5c-.69 0-1.25-.56-1.25-1.25V5.25Z" /></svg>',
-        forward: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="size-6"><path stroke-linecap="round" stroke-linejoin="round" d="m13 6 6 6-6 6V6ZM5 6l6 6-6 6V6Z" /></svg>',
+        forward: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M240,56v48a8,8,0,0,1-8,8H184a8,8,0,0,1,0-16H211.4L184.81,71.64l-.25-.24a80,80,0,1,0-1.67,114.78,8,8,0,0,1,11,11.63A95.44,95.44,0,0,1,128,224h-1.32A96,96,0,1,1,195.75,60L224,85.8V56a8,8,0,1,1,16,0Z"/></svg>',
         download: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="size-6"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v10m0 0 4-4m-4 4-4-4M5 18h14" /></svg>'
     };
 
-    const getButtonIdleBackground = (button) => {
-        if (!button) return 'transparent';
-        if (button.dataset.buttonKind === 'speed-pill') return getPlayerTheme().speedPillBackground;
-        return 'transparent';
-    };
+    const skipValueElements = new WeakMap();
+    const skipLabel = (direction, seconds) => `Skip ${direction} ${seconds} ${seconds === 1 ? 'second' : 'seconds'}`;
+    const getButtonIdleBackground = () => 'transparent';
 
     const getButtonHoverBackground = (button) => {
         if (!button || button.disabled) return getButtonIdleBackground(button);
@@ -450,7 +457,7 @@
         button.style.backgroundColor = hovered
             ? getButtonHoverBackground(button)
             : getButtonIdleBackground(button);
-        button.style.transform = hovered && !button.disabled ? 'translateY(-1px)' : 'none';
+        button.style.transform = 'none';
     };
 
     const refreshButtonHoverState = (button, hoverToken) => {
@@ -474,6 +481,8 @@
     };
 
     const getSvgSize = (button) => {
+        if (['backward', 'forward'].includes(button.dataset.iconName)) return 34;
+        if (['play', 'pause'].includes(button.dataset.iconName)) return 27;
         const buttonSize = Number(button.dataset.buttonSize || 0);
         if (buttonSize >= 40) return 22;
         if (buttonSize >= 34) return 19;
@@ -499,6 +508,7 @@
         if (!button.dataset.hoverToken) button.dataset.hoverToken = 'controlHoverBackground';
         button.disabled = !enabled;
         button.style.cssText = `${iconButtonStyle};width:${nextSize}px;height:${nextSize}px;`;
+        if (!['play', 'pause'].includes(iconName)) button.style.color = 'var(--ae-muted)';
         button.style.opacity = enabled ? '1' : '0.45';
         button.style.cursor = enabled ? 'pointer' : 'default';
 
@@ -520,6 +530,18 @@
             svg.style.display = 'block';
         }
 
+        if (iconName === 'backward' || iconName === 'forward') {
+            let value = skipValueElements.get(button);
+            if (!value) {
+                value = document.createElement('span');
+                value.className = 'ae-skip-value';
+                value.setAttribute('aria-hidden', 'true');
+                button.appendChild(value);
+                skipValueElements.set(button, value);
+            }
+            value.textContent = String(iconName === 'backward'
+                ? playerSettings.skipBackSeconds : playerSettings.skipForwardSeconds);
+        }
         renderButtonInteractionState(button);
     };
 
@@ -544,85 +566,6 @@
         const button = document.createElement('button');
         setIconButton(button, iconName, label, size, hoverToken);
         return button;
-    };
-
-    const ensurePlayerStyles = () => {
-        if (document.getElementById('ae_enhanced_player_styles')) return;
-
-        const style = document.createElement('style');
-        style.id = 'ae_enhanced_player_styles';
-        style.textContent = `
-            #ae_enhanced_player .ae_seek_bar {
-                --ae-seek-progress: 0%;
-                -webkit-appearance: none;
-                appearance: none;
-                background:
-                    linear-gradient(
-                        to right,
-                        var(--ae-seek-track-elapsed) 0%,
-                        var(--ae-seek-track-elapsed) var(--ae-seek-progress),
-                        var(--ae-seek-track-remaining) var(--ae-seek-progress),
-                        var(--ae-seek-track-remaining) 100%
-                    )
-                    center / 100% 7px no-repeat;
-                cursor: pointer;
-                direction: ltr;
-                height: 20px;
-                margin: 0;
-                border-radius: 999px;
-                width: 100%;
-            }
-
-            #ae_enhanced_player .ae_seek_bar:focus {
-                outline: none;
-            }
-
-            #ae_enhanced_player .ae_seek_bar::-webkit-slider-runnable-track {
-                background: transparent;
-                border: 0;
-                border-radius: 999px;
-                height: 7px;
-            }
-
-            #ae_enhanced_player .ae_seek_bar::-webkit-slider-thumb {
-                -webkit-appearance: none;
-                appearance: none;
-                background: var(--ae-seek-thumb);
-                border: 1px solid var(--ae-seek-thumb-border);
-                border-radius: 999px;
-                box-shadow: var(--ae-seek-thumb-shadow);
-                height: 16px;
-                margin-top: -4.5px;
-                width: 16px;
-            }
-
-            #ae_enhanced_player .ae_seek_bar:focus-visible::-webkit-slider-thumb {
-                box-shadow: var(--ae-seek-thumb-shadow), 0 0 0 3px var(--ae-focus-ring);
-            }
-
-            #ae_enhanced_player .ae_seek_bar::-moz-range-track {
-                background: transparent;
-                border: 0;
-                border-radius: 999px;
-                height: 7px;
-            }
-
-            #ae_enhanced_player .ae_seek_bar::-moz-range-progress {
-                background: var(--ae-seek-track-elapsed);
-                border-radius: 999px;
-                height: 7px;
-            }
-
-            #ae_enhanced_player .ae_seek_bar::-moz-range-thumb {
-                background: var(--ae-seek-thumb);
-                border: 1px solid var(--ae-seek-thumb-border);
-                border-radius: 999px;
-                box-shadow: var(--ae-seek-thumb-shadow);
-                height: 16px;
-                width: 16px;
-            }
-        `;
-        (document.head || document.documentElement).appendChild(style);
     };
 
     const formatRate = (rate) => `${String(rate).replace(/\.0$/, '')}x`;
@@ -689,6 +632,12 @@
     };
 
     const hasAudioSource = (element = audio) => hasElementSource(element);
+
+    // A replacement session can capture its response before ChatGPT creates
+    // the next page audio element. Keep the existing controller during that gap.
+    const isAwaitingSessionAudio = () => playerSession.id > 0 && !playerSession.isClosed
+        && !playerSession.audioElement
+        && [CAPTURE_STATE.LOADING, CAPTURE_STATE.READY].includes(playerSession.captureState);
 
     const getPlaybackKey = (element) => {
         if (!element) return '';
@@ -808,8 +757,8 @@
     };
 
     const updateJumpButtonLabels = () => {
-        refreshIconButton(backBtn, 'backward', `Skip back ${playerSettings.skipBackSeconds} seconds`);
-        refreshIconButton(forwardBtn, 'forward', `Skip forward ${playerSettings.skipForwardSeconds} seconds`);
+        refreshIconButton(backBtn, 'backward', skipLabel('back', playerSettings.skipBackSeconds));
+        refreshIconButton(forwardBtn, 'forward', skipLabel('forward', playerSettings.skipForwardSeconds));
     };
 
     const applyPlayerSettings = (settings = {}) => {
@@ -853,6 +802,7 @@
     const closeSpeedMenu = () => {
         if (!speedMenu) return;
         speedMenu.style.display = 'none';
+        speedBtn?.setAttribute('aria-expanded', 'false');
     };
 
     const updateTrackTitle = () => {
@@ -874,12 +824,15 @@
         const themeName = getPreferredThemeName();
         const theme = getPlayerTheme();
 
+        queueUi?.setTheme(theme);
         controlsDiv.style.background = theme.playerSurface;
         controlsDiv.style.borderColor = theme.playerBorder;
         controlsDiv.style.boxShadow = theme.playerShadow;
         controlsDiv.style.color = theme.playerText;
         controlsDiv.style.colorScheme = themeName;
         controlsDiv.style.setProperty('--ae-focus-ring', theme.focusRing);
+        controlsDiv.style.setProperty('--ae-muted', theme.secondaryText);
+        controlsDiv.style.setProperty('--ae-hover', theme.controlHoverBackground);
         controlsDiv.style.setProperty('--ae-seek-track-elapsed', theme.seekTrackElapsed);
         controlsDiv.style.setProperty('--ae-seek-track-remaining', theme.seekTrackRemaining);
         controlsDiv.style.setProperty('--ae-seek-thumb', theme.seekThumb);
@@ -899,8 +852,8 @@
         }
 
         if (speedBtn) {
-            speedBtn.style.color = theme.speedPillText;
-            refreshButtonHoverState(speedBtn, 'speedPillHoverBackground');
+            speedBtn.style.color = theme.secondaryText;
+            refreshButtonHoverState(speedBtn, 'controlHoverBackground');
         }
 
         if (speedMenu) {
@@ -1020,10 +973,11 @@
         }
 
         if (seekStatusLabel) {
-            seekStatusLabel.textContent = hasAudioSource() ? 'Loading seekbar...' : 'Seek unavailable';
+            seekStatusLabel.textContent = isAwaitingSessionAudio() ? 'Starting next response…'
+                : hasAudioSource() ? 'Loading seekbar...' : 'Seek unavailable';
             seekStatusLabel.style.display = 'block';
         }
-        seekBar.style.display = 'none';
+        seekBar.style.display = 'block';
         seekBar.disabled = true;
         seekBar.style.opacity = '0.45';
         seekBar.style.cursor = 'default';
@@ -1039,6 +993,8 @@
         const isCapturedOwner = currentAudio === playerSession.capturedPlaybackElement;
         let iconName = isPlaying ? 'pause' : 'play';
         let label = isPlaying ? 'Pause' : 'Play';
+
+        if (isAwaitingSessionAudio()) label = 'Starting next response';
 
         if (isPlaying && !isCapturedOwner) {
             if (playerSession.capturedPlaybackState === CAPTURED_PLAYBACK_STATE.FAILED) {
@@ -1132,6 +1088,9 @@
     };
 
     const teardownControls = () => {
+        queueDrawerExpanded = queueUi?.getExpanded() ?? queueDrawerExpanded;
+        queueUi?.destroy();
+        queueUi = null;
         isCollapsed = false;
         closeSpeedMenu();
         stopUiSync();
@@ -1157,6 +1116,9 @@
         speedMenu = null;
         minimizeBtn = null;
         timesRowDiv = null;
+        playbackGroupDiv = null;
+        expandedTransportDiv = null;
+        windowButtonsDiv = null;
     };
 
     const closePlayer = (reason = 'user') => {
@@ -1181,7 +1143,13 @@
 
     const toggleCollapsed = () => {
         isCollapsed = !isCollapsed;
+        closeSpeedMenu();
+        if (controlsDiv) controlsDiv.dataset.collapsed = String(isCollapsed);
+        // Leave the focused window controls mounted while moving the transport.
+        if (isCollapsed && titleBarDiv && playbackGroupDiv) titleBarDiv.insertBefore(playbackGroupDiv, windowButtonsDiv);
+        else if (expandedTransportDiv && playbackGroupDiv) expandedTransportDiv.appendChild(playbackGroupDiv);
         if (contentDiv) contentDiv.style.display = isCollapsed ? 'none' : 'grid';
+        queueUi?.setCollapsed(isCollapsed);
         if (titleBarDiv) titleBarDiv.style.borderRadius = isCollapsed ? '14px' : '14px 14px 0 0';
         if (minimizeBtn) {
             refreshIconButton(minimizeBtn, isCollapsed ? 'expand' : 'collapse', isCollapsed ? 'Show timeline' : 'Hide timeline');
@@ -1280,114 +1248,95 @@
 
     const buildControls = () => {
         if (controlsDiv) return;
-
-        const themeName = getPreferredThemeName();
-        const theme = getPlayerTheme();
-        ensurePlayerStyles();
-
-        controlsDiv = document.createElement('div');
+        const make = (tag, className) => {
+            const node = document.createElement(tag);
+            node.className = className;
+            return node;
+        };
+        controlsDiv = make('div', 'ae-player');
         controlsDiv.id = 'ae_enhanced_player';
-        controlsDiv.style.cssText = [
-            'position:fixed',
-            'top:24px',
-            'left:50%',
-            'transform:translateX(-50%)',
-            'z-index:2147483647',
-            'width:min(560px, calc(100vw - 20px))',
-            'border-radius:14px',
-            'overflow:visible',
-            `border:1px solid ${theme.playerBorder}`,
-            `box-shadow:${theme.playerShadow}`,
-            `color:${theme.playerText}`,
-            'font-family:"Segoe UI", sans-serif',
-            'font-size:14px',
-            `background:${theme.playerSurface}`,
-            `color-scheme:${themeName}`,
-            'box-sizing:border-box'
-        ].join(';');
+        controlsDiv.dataset.collapsed = 'false';
 
-        const titleBar = document.createElement('div');
-        titleBar.style.cssText = [
-            'display:grid',
-            'grid-template-columns:minmax(120px, 1fr) auto auto',
-            'align-items:center',
-            'gap:8px',
-            'min-height:50px',
-            'padding:7px 10px 7px 12px',
-            `background:${theme.playerSurface}`,
-            'border-radius:14px 14px 0 0',
-            'cursor:move',
-            'user-select:none',
-            'box-sizing:border-box'
-        ].join(';');
-        titleBar.onmousedown = beginDrag;
-        titleBarDiv = titleBar;
-
-        trackTitleLabel = document.createElement('div');
-        trackTitleLabel.style.cssText = `min-width:0;font-size:14px;font-weight:650;line-height:1.25;letter-spacing:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:${theme.titleText};`;
+        titleBarDiv = make('div', 'ae-player-header');
+        titleBarDiv.onmousedown = beginDrag;
+        trackTitleLabel = make('div', 'ae-player-title');
         trackTitleLabel.setAttribute('role', 'button');
         trackTitleLabel.setAttribute('tabindex', '0');
         trackTitleLabel.setAttribute('aria-label', 'Toggle timeline');
-        trackTitleLabel.title = 'Drag to move. Click to show or hide timeline.';
-        trackTitleLabel.onkeydown = (event) => {
+        trackTitleLabel.onkeydown = event => {
             if (event.key !== 'Enter' && event.key !== ' ') return;
             event.preventDefault();
             toggleCollapsed();
         };
-
-        const playbackGroup = document.createElement('div');
-        playbackGroup.style.cssText = 'display:flex;justify-content:center;align-items:center;gap:6px;';
-
-        const titleBarButtons = document.createElement('div');
-        titleBarButtons.style.cssText = 'display:flex;align-items:center;gap:4px;';
-
-        minimizeBtn = createIconButton('collapse', 'Hide timeline', 36);
+        windowButtonsDiv = make('div', 'ae-window-controls');
+        minimizeBtn = createIconButton('collapse', 'Hide timeline', 30);
         minimizeBtn.onclick = toggleCollapsed;
-
-        const closeBtn = createIconButton('close', 'Close player', 36, 'dangerHoverBackground');
-        closeBtn.addEventListener('click', (event) => {
+        const closeBtn = createIconButton('close', 'Close player', 30, 'dangerHoverBackground');
+        closeBtn.onclick = event => {
             event.preventDefault();
             event.stopPropagation();
             closePlayer();
-        });
+        };
+        windowButtonsDiv.append(minimizeBtn, closeBtn);
+        titleBarDiv.append(trackTitleLabel, windowButtonsDiv);
 
-        contentDiv = document.createElement('div');
-        contentDiv.style.cssText = [
-            'display:grid',
-            'gap:5px',
-            'padding:0 14px 9px',
-            `background:${theme.playerSurface}`,
-            'border-radius:0 0 14px 14px',
-            'box-sizing:border-box'
-        ].join(';');
-
-        speedBtn = document.createElement('button');
+        contentDiv = make('div', 'ae-player-content');
+        const listeningRow = make('div', 'ae-listening-row');
+        const speedHost = make('div', 'ae-speed-group');
+        speedBtn = make('button', 'ae-speed-button');
         speedBtn.type = 'button';
-        speedBtn.dataset.buttonKind = 'speed-pill';
         speedBtn.title = 'Playback speed';
-        speedBtn.style.cssText = `${nakedButtonStyle};height:28px;min-width:58px;padding:0 10px;border-radius:999px;background:${theme.speedPillBackground};font-size:13px;font-weight:650;color:${theme.speedPillText};text-align:center;`;
-        setButtonHoverState(speedBtn, 'speedPillHoverBackground');
-        speedBtn.onclick = (event) => {
+        speedBtn.setAttribute('aria-label', 'Playback speed');
+        speedBtn.setAttribute('aria-expanded', 'false');
+        setButtonHoverState(speedBtn);
+        speedBtn.onclick = event => {
             event.stopPropagation();
             if (!speedMenu) return;
-            speedMenu.style.display = speedMenu.style.display === 'block' ? 'none' : 'block';
+            const open = speedMenu.style.display !== 'block';
+            speedMenu.style.display = open ? 'block' : 'none';
+            speedBtn.setAttribute('aria-expanded', String(open));
         };
+        speedHost.append(speedBtn, createSpeedMenu());
+        playbackGroupDiv = make('div', 'ae-transport');
+        expandedTransportDiv = make('div', 'ae-transport-slot');
+        expandedTransportDiv.appendChild(playbackGroupDiv);
+        backBtn = createIconButton('backward', skipLabel('back', playerSettings.skipBackSeconds), 36);
+        backBtn.onclick = () => {
+            const currentAudio = getActiveAudio();
+            if (!currentAudio) return;
+            audio = currentAudio;
+            const requestedTime = Math.max(0, audio.currentTime - playerSettings.skipBackSeconds);
+            const safeTarget = resolveSeekTarget(audio, requestedTime, 'backward');
+            if (safeTarget === null) return;
+            audio.currentTime = safeTarget;
+            updateTimeDisplay();
+        };
+        playPauseBtn = createIconButton('play', 'Play', 40);
+        playPauseBtn.onclick = () => { void toggleSessionPlayback(); };
+        forwardBtn = createIconButton('forward', skipLabel('forward', playerSettings.skipForwardSeconds), 36);
+        forwardBtn.onclick = () => {
+            const currentAudio = getActiveAudio();
+            if (!currentAudio) return;
+            audio = currentAudio;
+            const requestedTime = audio.currentTime + playerSettings.skipForwardSeconds;
+            const safeTarget = resolveSeekTarget(audio, requestedTime, 'forward');
+            if (safeTarget === null) return;
+            audio.currentTime = safeTarget;
+            updateTimeDisplay();
+        };
+        playbackGroupDiv.append(backBtn, playPauseBtn, forwardBtn);
+        const rightGroup = make('div', 'ae-utilities');
+        downloadBtn = createIconButton('download', 'Download audio', 36);
+        downloadBtn.onclick = downloadAudio;
+        rightGroup.appendChild(downloadBtn);
+        listeningRow.append(speedHost, expandedTransportDiv, rightGroup);
 
-        const leftTimesContainer = document.createElement('div');
-        leftTimesContainer.style.cssText = 'position:relative;display:flex;align-items:center;';
-        leftTimesContainer.append(speedBtn, createSpeedMenu());
-
-        seekStatusLabel = document.createElement('div');
-        seekStatusLabel.style.cssText = `display:none;text-align:center;font-size:13px;color:${theme.secondaryText};white-space:nowrap;`;
-        seekStatusLabel.textContent = 'Loading seekbar...';
-
-        seekBar = document.createElement('input');
-        seekBar.className = 'ae_seek_bar';
+        seekBar = make('input', 'ae_seek_bar');
         seekBar.type = 'range';
         seekBar.min = '0';
         seekBar.max = '1000';
         seekBar.value = '0';
-        seekBar.style.cssText = 'width:100%;min-width:0;cursor:pointer;';
+        seekBar.setAttribute('aria-label', 'Playback position');
         seekBar.oninput = () => {
             const currentAudio = getActiveAudio();
             const timeline = getAudioTimeline();
@@ -1404,72 +1353,25 @@
             currentAudio.currentTime = safeTarget;
             updateTimeDisplay();
         };
-
-        const timesRow = document.createElement('div');
-        timesRow.style.cssText = `display:grid;grid-template-columns:auto minmax(8ch, 1fr) auto;align-items:center;font-size:13px;font-variant-numeric:tabular-nums;color:${theme.secondaryText};gap:10px;min-height:28px;`;
-        timesRowDiv = timesRow;
-
-        const timeGroup = document.createElement('div');
-        timeGroup.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:4px;min-width:0;white-space:nowrap;';
-
-        currentTimeLabel = document.createElement('span');
-        currentTimeLabel.style.cssText = 'text-align:right;';
-        currentTimeLabel.textContent = '0:00';
-
-        timeSeparatorLabel = document.createElement('span');
-        timeSeparatorLabel.textContent = '/';
-        timeSeparatorLabel.style.cssText = 'opacity:0.55;';
-
-        durationLabel = document.createElement('span');
-        durationLabel.style.cssText = 'text-align:left;';
-        durationLabel.textContent = '--:--';
-
-        timeGroup.append(currentTimeLabel, timeSeparatorLabel, durationLabel, seekStatusLabel);
-
-        const rightGroup = document.createElement('div');
-        rightGroup.style.cssText = 'display:flex;justify-content:flex-end;align-items:center;';
-
-        backBtn = createIconButton('backward', `Skip back ${playerSettings.skipBackSeconds} seconds`, 36);
-        backBtn.onclick = () => {
-            const currentAudio = getActiveAudio();
-            if (!currentAudio) return;
-            audio = currentAudio;
-            const requestedTime = Math.max(0, audio.currentTime - playerSettings.skipBackSeconds);
-            const safeTarget = resolveSeekTarget(audio, requestedTime, 'backward');
-            if (safeTarget === null) return;
-            audio.currentTime = safeTarget;
-            updateTimeDisplay();
-        };
-
-        playPauseBtn = createIconButton('play', 'Play', 40);
-        playPauseBtn.onclick = () => {
-            void toggleSessionPlayback();
-        };
-
-        forwardBtn = createIconButton('forward', `Skip forward ${playerSettings.skipForwardSeconds} seconds`, 36);
-        forwardBtn.onclick = () => {
-            const currentAudio = getActiveAudio();
-            if (!currentAudio) return;
-            audio = currentAudio;
-            const requestedTime = audio.currentTime + playerSettings.skipForwardSeconds;
-            const safeTarget = resolveSeekTarget(audio, requestedTime, 'forward');
-            if (safeTarget === null) return;
-            audio.currentTime = safeTarget;
-            updateTimeDisplay();
-        };
-
-        downloadBtn = createIconButton('download', 'Download audio', 36);
-        downloadBtn.onclick = downloadAudio;
-
-        playbackGroup.append(backBtn, playPauseBtn, forwardBtn);
-        titleBarButtons.append(minimizeBtn, closeBtn);
-        titleBar.append(trackTitleLabel, playbackGroup, titleBarButtons);
-        rightGroup.append(downloadBtn);
-        timesRow.append(leftTimesContainer, timeGroup, rightGroup);
-        contentDiv.append(seekBar, timesRow);
-        controlsDiv.append(titleBar, contentDiv);
+        timesRowDiv = make('div', 'ae-time-labels');
+        currentTimeLabel = make('span', 'ae-current-time');
+        durationLabel = make('span', 'ae-duration');
+        seekStatusLabel = make('span', 'ae-seek-status');
+        seekStatusLabel.setAttribute('role', 'status');
+        seekStatusLabel.style.display = 'none';
+        timeSeparatorLabel = null;
+        timesRowDiv.append(currentTimeLabel, seekStatusLabel, durationLabel);
+        contentDiv.append(listeningRow, seekBar, timesRowDiv);
+        controlsDiv.append(titleBarDiv, contentDiv);
         document.body.appendChild(controlsDiv);
-
+        queueUi = window.AEPlayerReadingQueue?.create({
+            document, container: controlsDiv, toggleHost: rightGroup,
+            expanded: queueDrawerExpanded,
+            onCommand: detail => document.dispatchEvent(new CustomEvent('ae-read-aloud-player:queue-command', { detail }))
+        }) || null;
+        queueUi?.update(queueSnapshot);
+        queueUi?.setCollapsed(isCollapsed);
+        document.dispatchEvent(new CustomEvent('ae-read-aloud-player:queue-request'));
         updateTrackTitle();
         updateJumpButtonLabels();
         applyTheme();
@@ -1492,7 +1394,8 @@
         }
         updateControlState();
 
-        if (!hasAudioSource(currentAudio) && controlsDiv) {
+        if (!hasAudioSource(currentAudio) && controlsDiv && !isAwaitingSessionAudio()) {
+            publishPlaybackState();
             teardownControls();
         }
     };
@@ -1761,7 +1664,12 @@
         }
 
         if (!audio || !hasAudioSource()) {
+            if (controlsDiv && isAwaitingSessionAudio()) {
+                updateControlState();
+                return;
+            }
             clearPlayerDismissal();
+            if (playerSession.audioElement) publishPlaybackState();
             teardownControls();
             return;
         }
@@ -1777,6 +1685,7 @@
         }
 
         buildControls();
+        updateControlState();
         startUiSync();
     };
 
@@ -1953,10 +1862,23 @@
         applyPlayerSettings(event.detail?.settings);
     });
 
+    document.addEventListener('ae-read-aloud-player:queue', event => {
+        const value = event.detail;
+        if (!value || !Array.isArray(value.items)) return;
+        queueSnapshot = value;
+        queueUi?.update(value);
+    });
+
     document.addEventListener('click', (event) => {
         if (!speedMenu || !speedBtn) return;
         if (speedMenu.contains(event.target) || speedBtn.contains(event.target)) return;
         closeSpeedMenu();
+    });
+
+    document.addEventListener('keydown', event => {
+        if (event.key !== 'Escape' || speedMenu?.style.display !== 'block') return;
+        closeSpeedMenu();
+        speedBtn?.focus?.({ preventScroll: true });
     });
 
     installThemeListener();
@@ -2009,7 +1931,7 @@
             }
         } catch (error) {
             cleanup();
-            if (intent?.requestId && !requestController?.signal.aborted) publishPlaybackState('error', 'request-failed');
+            if (intent && !requestController?.signal.aborted) publishPlaybackState('error', 'request-failed', true, intent);
             throw error;
         }
 

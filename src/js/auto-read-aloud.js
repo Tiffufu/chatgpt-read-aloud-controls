@@ -11,6 +11,9 @@
     const SNAPSHOT_EVENT = 'ae-read-aloud-player:playback-request';
     const INTENT_EVENT = 'ae-read-aloud-player:playback-intent';
     const CANCEL_EVENT = 'ae-read-aloud-player:playback-cancel';
+    const QUEUE_EVENT = 'ae-read-aloud-player:queue';
+    const QUEUE_REQUEST = 'ae-read-aloud-player:queue-request';
+    const QUEUE_COMMAND = 'ae-read-aloud-player:queue-command';
     const START_ERROR = 'Read Aloud could not start. Start it manually to continue the queue, or turn automatic reading off and on to reset it.';
     const RECOVER = ' Start Read Aloud manually to continue the queue.';
     const playbackError = reason => ({
@@ -19,10 +22,32 @@
         'media-network': 'Read Aloud audio stopped because of a network error.' + RECOVER,
         'media-decode': 'The browser could not decode the Read Aloud audio.' + RECOVER,
         'media-unsupported': 'The browser could not play the Read Aloud audio format.' + RECOVER,
-        'media-aborted': 'Read Aloud audio playback was interrupted.' + RECOVER
+        'media-aborted': 'Read Aloud audio playback was interrupted.' + RECOVER,
+        'media-source-unavailable': 'Read Aloud stopped because its audio source is no longer available.' + RECOVER
     }[reason] || 'Read Aloud audio playback failed.' + RECOVER);
 
-    function createAutoReadController({ start, schedule = setTimeout, cancel = clearTimeout, onError = () => {}, onCancel = () => {} }) {
+    const sentenceSegmenter = typeof Intl.Segmenter === 'function'
+        ? new Intl.Segmenter(undefined, { granularity: 'sentence' }) : null;
+
+    function createSnippet(value) {
+        const text = String(value || '').replace(/\s+/g, ' ').trim();
+        const characters = Array.from(text.slice(0, 210));
+        let opening = '';
+        const sentences = sentenceSegmenter ? sentenceSegmenter.segment(text.slice(0, 210))
+            : (text.slice(0, 210).match(/[^.!?]+[.!?]+(?:\s|$)|[^.!?]+$/g) || [text]);
+        for (const sentence of sentences) {
+            opening += sentence.segment ?? sentence;
+            const candidate = opening.trim();
+            if (Array.from(candidate).length > 104) break;
+            if (candidate.length >= 40) return candidate;
+        }
+        if (characters.length <= 104) return text;
+        const prefix = characters.slice(0, 105).join('');
+        const boundary = prefix.lastIndexOf(' ');
+        return (boundary > 0 ? prefix.slice(0, boundary) : characters.slice(0, 104).join('')).trimEnd() + '…';
+    }
+
+    function createAutoReadController({ start, schedule = setTimeout, cancel = clearTimeout, onError: reportError = () => {}, onCancel = () => {}, onChange = () => {} }) {
         let enabled = false;
         let current = null;
         let records = new Map();
@@ -38,8 +63,32 @@
         let attempt = null;
         let sequence = 0;
         let playback = { sessionId: 0, state: 'closed' };
+        let activeItem = null;
+        let undoItems = [];
+        let error = '';
+        let lastPublished = '';
+        let disposed = false;
 
         const busy = () => ['starting', 'playing', 'paused'].includes(playback.state);
+        const serialize = item => ({
+            id: item.id, revision: item.revision, signature: item.signature,
+            snippet: createSnippet(item.snippet || records.get(item.id)?.snippet || 'Response'),
+            source: item.source === 'manual' ? 'manual' : 'automatic'
+        });
+        const getSnapshot = () => ({
+            items: queue.filter(valid).map(serialize),
+            current: playback.state !== 'closed' && activeItem ? serialize(activeItem) : null,
+            state: playback.state, suspended, error, enabled,
+            canUndo: undoItems.some(({ item }) => valid(item))
+        });
+        const emit = (force = false) => {
+            const value = getSnapshot();
+            const key = JSON.stringify(value);
+            if (!force && key === lastPublished) return;
+            lastPublished = key;
+            onChange(value);
+        };
+        const onError = message => { error = message; reportError(message); emit(); };
         const clearAttempt = (notify = false) => {
             if (!attempt) return;
             const previous = attempt;
@@ -50,6 +99,7 @@
         const clearQueue = () => {
             clearAttempt(true);
             queue = [];
+            undoItems = [];
             suspended = false;
             onError('');
         };
@@ -71,7 +121,7 @@
                 && record.state === 'complete' && record.hasText;
         };
         const tryStart = () => {
-            if (!attempt || attempt.clicked || !enabled || suspended || busy()) return;
+            if (!attempt || attempt.clicked || disposed || suspended || busy()) return;
             if (!valid(attempt.item)) {
                 queue = queue.filter(item => item !== attempt.item);
                 clearAttempt();
@@ -93,7 +143,7 @@
             }
         };
         const pump = () => {
-            if (!enabled || suspended || busy()) return;
+            if (disposed || suspended || busy()) return;
             if (attempt) { tryStart(); return; }
             while (queue.length && !valid(queue[0])) queue.shift();
             if (!queue.length) return;
@@ -108,18 +158,20 @@
                     : 'ChatGPT’s Read Aloud button was unavailable for 15 seconds.' + RECOVER;
                 suspended = true;
                 clearAttempt(true);
+                if (playback.state === 'starting') playback = { ...playback, state: 'error' };
                 onError(message);
             }, 15000);
             tryStart();
         };
         const scan = (value) => {
-            if (!enabled) { current = value; return; }
-            if (!current) { baseline(value); return; }
+            if (disposed) return;
+            if (!current) { baseline(value); emit(); return; }
             // An existing conversation hydrates after document_start. Its first
             // loaded user turn is history, not evidence of a fresh submission.
             if (!current.userKey && !current.turns.length && !generationOpen
                 && !value.generating && /\/c\//.test(value.conversation)) {
                 baseline(value);
+                emit();
                 return;
             }
             if (current.conversation !== value.conversation) {
@@ -130,13 +182,14 @@
                 if (!assigned) {
                     clearQueue();
                     baseline(value);
+                    emit();
                     return;
                 }
             }
             // Mounting history, scrolling, and tab focus can all change userKey.
             // Only an observed native generation control or a submit action
             // opens a generation cycle; DOM insertion alone never does.
-            if (value.generating && !current.generating) {
+            if (enabled && value.generating && !current.generating) {
                 if (!generationOpen) generationBaselineIds = new Set(records.keys());
                 generationOpen = true;
                 generationCancelled = false;
@@ -148,7 +201,7 @@
             }
             const userSubmitted = requestedUserKey === null || (value.userKey !== requestedUserKey
                 && (!requestedUserKey || !value.userKeys || value.userKeys.includes(requestedUserKey)));
-            const canGenerate = generationOpen && userSubmitted;
+            const canGenerate = enabled && generationOpen && userSubmitted;
             const latestId = value.turns[value.turns.length - 1]?.id;
             const nextRecords = new Map();
             let completedCycle = false;
@@ -161,7 +214,7 @@
                 const record = {
                     ...turn,
                     revision: (previous?.revision || 0) + (begins || revised ? 1 : 0),
-                    eligible: !generationCancelled && (previous?.eligible
+                    eligible: enabled && !generationCancelled && (previous?.eligible
                         || (canGenerate && turn.id === latestId
                             && (begins || !generationBaselineIds.has(turn.id) || revised))),
                     handled: begins || revised ? false : Boolean(previous?.handled)
@@ -174,27 +227,108 @@
                     record.handled = true;
                     record.eligible = false;
                     completedCycle = true;
-                    queue.push({ id: record.id, revision: record.revision, signature: record.signature });
+                    queue.push({ ...serialize(record), source: 'automatic' });
                 }
             });
             records = nextRecords;
             current = value;
+            queue = queue.filter(valid);
             if (completedCycle) generationOpen = false;
             if (attempt && !valid(attempt.item)) {
                 queue = queue.filter(item => item !== attempt.item);
                 clearAttempt(true);
             }
             pump();
+            emit();
+        };
+
+        const edit = () => {
+            if (attempt && (!queue.includes(attempt.item) || queue[0] !== attempt.item)) clearAttempt(true);
+            pump();
+            emit();
         };
 
         return {
             scan,
+            getSnapshot,
+            publish: () => emit(true),
             setEnabled(value, snapshot) {
-                if (enabled === value) { if (value) scan(snapshot); return; }
+                if (enabled === value && current) { scan(snapshot); return; }
                 enabled = value;
-                clearQueue();
+                queue = queue.filter(item => item.source === 'manual');
+                if (attempt && !queue.includes(attempt.item)) clearAttempt(true);
+                suspended = false;
+                undoItems = [];
                 baseline(snapshot);
+                queue = queue.filter(item => records.get(item.id)?.signature === item.signature)
+                    .map(item => { item.revision = records.get(item.id).revision; return item; });
+                if (activeItem && records.get(activeItem.id)?.signature === activeItem.signature) {
+                    activeItem.revision = records.get(activeItem.id).revision;
+                }
+                onError('');
+                pump();
+                emit();
             },
+            enqueue(responseId) {
+                const record = records.get(responseId);
+                if (disposed || !record || record.state !== 'complete' || !record.hasText) return false;
+                const existing = queue.find(item => item.id === responseId && valid(item));
+                if (existing) {
+                    existing.source = 'manual';
+                    record.handled = true;
+                    if (suspended && !busy()) { suspended = false; onError(''); pump(); }
+                    emit();
+                    return true;
+                }
+                if (busy() && playback.responseId === responseId) return false;
+                record.handled = true;
+                queue.push({ ...serialize(record), source: 'manual' });
+                if (suspended && !busy()) { suspended = false; onError(''); }
+                pump();
+                emit();
+                return true;
+            },
+            remove(responseId) {
+                const index = queue.findIndex(item => item.id === responseId);
+                if (index < 0) return;
+                undoItems = [{ item: queue[index], index }];
+                queue.splice(index, 1);
+                edit();
+            },
+            move(responseId, direction) {
+                const from = queue.findIndex(item => item.id === responseId);
+                const target = from + direction;
+                if (![1, -1].includes(direction) || from < 0 || target < 0 || target >= queue.length) return;
+                queue.splice(target, 0, queue.splice(from, 1)[0]);
+                edit();
+            },
+            reorder(responseId, targetId) {
+                const from = queue.findIndex(item => item.id === responseId);
+                const to = queue.findIndex(item => item.id === targetId);
+                if (from < 0 || to < 0 || from === to) return;
+                queue.splice(to, 0, queue.splice(from, 1)[0]);
+                edit();
+            },
+            clear() {
+                undoItems = queue.map((item, index) => ({ item, index }));
+                queue = [];
+                suspended = false;
+                onError('');
+                edit();
+            },
+            undo() {
+                const restore = undoItems;
+                undoItems = [];
+                restore.forEach(({ item, index }) => {
+                    if (valid(item) && !queue.some(value => value.id === item.id)
+                        && !(busy() && playback.responseId === item.id)) {
+                        queue.splice(Math.min(index, queue.length), 0, item);
+                    }
+                });
+                edit();
+            },
+            retry() { suspended = false; onError(''); pump(); emit(); },
+            dispose() { disposed = true; enabled = false; clearQueue(); emit(); },
             beginGeneration(responseId = null) {
                 generationBaselineIds = new Set(records.keys());
                 generationOpen = true;
@@ -216,11 +350,23 @@
                 suspended = false;
                 onError('');
                 // Hold the queue before the native fetch or play event arrives.
-                playback = { ...playback, state: 'starting' };
+                playback = { ...playback, state: 'starting', responseId, requestId: null };
+                activeItem = record ? { ...serialize(record), source: 'manual' } : null;
+                emit();
             },
             playback(value) {
                 if (!value || !Number.isFinite(value.sessionId) || value.sessionId < playback.sessionId) return;
+                // The old page source may disappear after ending while the
+                // next response is already being requested. It cannot cancel
+                // or suspend that different response's pending start.
+                if (value.state === 'error' && value.reason === 'media-source-unavailable'
+                    && attempt && attempt.item.id !== value.responseId) return;
+                const newSession = value.sessionId !== playback.sessionId;
                 playback = value;
+                const playingRecord = records.get(value.responseId);
+                if (playingRecord && (newSession || !activeItem || activeItem.id !== value.responseId)) {
+                    activeItem = serialize(attempt?.item?.id === value.responseId ? attempt.item : playingRecord);
+                }
                 if (attempt?.clicked && value.state === 'playing'
                     && value.requestId === attempt.requestId && value.responseId === attempt.item.id) {
                     queue = queue.filter(item => item !== attempt.item);
@@ -229,16 +375,23 @@
                 }
                 if (value.state === 'closed') {
                     if (value.reason !== 'cancelled-start') clearQueue();
+                    emit();
                     return;
                 }
                 if (value.state === 'error') {
-                    if (!enabled) return;
+                    if (!enabled && !queue.length && !activeItem) return;
                     suspended = true;
+                    const failedAttempt = attempt;
                     clearAttempt(true);
+                    if (failedAttempt) activeItem = serialize(failedAttempt.item);
+                    else if (value.reason !== 'media-source-unavailable'
+                        && activeItem && activeItem.id === value.responseId && valid(activeItem)
+                        && !queue.some(item => item.id === activeItem.id)) queue.unshift(activeItem);
                     onError(playbackError(value.reason));
                     return;
                 }
                 if (value.state === 'ended') pump();
+                emit();
             }
         };
     }
@@ -251,6 +404,8 @@
         const SEND = 'button[data-testid="send-button"], button[data-testid="composer-submit-button"], button[aria-label="Send"], button[aria-label="Send prompt"]';
         const ids = new WeakMap();
         let nextId = 0;
+        let highlightTimer = null;
+        let restoreHighlight = () => {};
         const responseId = node => {
             const identified = node.closest('[data-turn-key], [data-message-id]') || node;
             const id = identified.getAttribute('data-turn-key') || identified.getAttribute('data-message-id');
@@ -290,7 +445,7 @@
                 id: responseId(node),
                 state: explicit === 'cancelled' || explicit === 'error' ? 'cancelled'
                     : streaming ? 'generating' : explicit === 'complete' || read ? 'complete' : 'tool',
-                hasText: Boolean(text), signature: hash(text), node, read
+                hasText: Boolean(text), signature: hash(text), snippet: createSnippet(text), node, read
             };
         };
         const conversation = () => new URL(location.href).pathname.replace(/\/$/, '') || '/';
@@ -307,6 +462,28 @@
                 };
             },
             find(id) { return entries().map(describe).find(turn => turn.id === id); },
+            reveal(id) {
+                const response = entries().find(node => responseId(node) === id);
+                if (!response) return false;
+                restoreHighlight();
+                document.defaultView.clearTimeout(highlightTimer);
+                const previousMargin = response.style.scrollMarginTop;
+                const player = document.getElementById?.('ae_enhanced_player')?.getBoundingClientRect();
+                const margin = player && player.top < document.defaultView.innerHeight / 2 ? player.bottom + 16 : 16;
+                response.style.scrollMarginTop = `${margin}px`;
+                response.setAttribute('data-ae-queue-highlight', '');
+                const reduced = document.defaultView.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+                response.scrollIntoView({ behavior: reduced ? 'instant' : 'smooth', block: 'start' });
+                restoreHighlight = () => {
+                    response.removeAttribute('data-ae-queue-highlight');
+                    response.style.scrollMarginTop = previousMargin;
+                };
+                highlightTimer = document.defaultView.setTimeout(() => {
+                    restoreHighlight();
+                    restoreHighlight = () => {};
+                }, 1600);
+                return true;
+            },
             clickKind(target) {
                 const button = target?.closest?.('button');
                 if (!button) return null;
@@ -338,6 +515,7 @@
         const adapter = createChatGPTAdapter(document, root.location);
         let error = '';
         let automaticClick = false;
+        let scheduledNativeStart = null;
         let enabled = false;
         let initialized = false;
         let scanScheduled = false;
@@ -351,19 +529,35 @@
             onError: message => {
                 error = message;
             },
-            onCancel: requestId => dispatch(CANCEL_EVENT, { requestId }),
+            onCancel: requestId => {
+                if (scheduledNativeStart?.requestId === requestId) scheduledNativeStart = null;
+                dispatch(CANCEL_EVENT, { requestId });
+            },
+            onChange: value => dispatch(QUEUE_EVENT, value),
             start(item, requestId) {
                 if (!contextAvailable()) return false;
                 const response = adapter.find(item.id);
-                if (!response?.read || response.read.disabled || response.read.getAttribute('aria-disabled') === 'true') return false;
+                if (!response?.read || response.read.disabled || response.read.getAttribute('aria-disabled') === 'true'
+                    || response.read.getAttribute('aria-pressed') === 'true') return false;
                 if (response.signature !== item.signature || response.state !== 'complete') return false;
-                automaticClick = true;
-                try {
-                    dispatch(INTENT_EVENT, { responseId: item.id, requestId });
-                    response.read.click();
-                } finally {
-                    automaticClick = false;
-                }
+                const pending = { requestId };
+                scheduledNativeStart = pending;
+                // HTMLElement.click suppresses reentrant clicks on the same
+                // button. Let the intercepted user click finish first.
+                root.queueMicrotask(() => {
+                    if (scheduledNativeStart !== pending || !contextAvailable()) return;
+                    scheduledNativeStart = null;
+                    const latest = adapter.find(item.id);
+                    if (!latest?.read || latest.read.disabled || latest.signature !== item.signature
+                        || latest.state !== 'complete' || latest.read.getAttribute('aria-pressed') === 'true') return;
+                    automaticClick = true;
+                    try {
+                        dispatch(INTENT_EVENT, { responseId: item.id, requestId });
+                        latest.read.click();
+                    } finally {
+                        automaticClick = false;
+                    }
+                });
                 return true;
             }
         });
@@ -371,7 +565,7 @@
             if (disposed) return;
             disposed = true;
             enabled = false;
-            controller.setEnabled(false, adapter.snapshot());
+            controller.dispose();
             observer?.disconnect();
             if (scanInterval !== null) root.clearInterval?.(scanInterval);
         };
@@ -394,13 +588,44 @@
         };
         document.addEventListener('ae-read-aloud-player:extension-invalidated', invalidate);
         document.addEventListener(PLAYBACK_EVENT, event => { if (!disposed) controller.playback(event.detail); });
+        document.addEventListener(QUEUE_REQUEST, () => { if (!disposed) controller.publish(); });
+        document.addEventListener(QUEUE_COMMAND, event => {
+            if (!initialized || !contextAvailable()) return;
+            const value = event.detail;
+            if (!value || typeof value.action !== 'string') return;
+            const id = typeof value.id === 'string' ? value.id : null;
+            scan();
+            if (value.action === 'reveal' && id) {
+                if (!adapter.reveal(id)) {
+                    error = 'This response is no longer available in the conversation.';
+                    dispatch(QUEUE_EVENT, { ...controller.getSnapshot(), error });
+                }
+            } else if (value.action === 'remove' && id) controller.remove(id);
+            else if (value.action === 'move' && id) controller.move(id, value.direction);
+            else if (value.action === 'reorder' && id && typeof value.targetId === 'string') controller.reorder(id, value.targetId);
+            else if (value.action === 'clear') controller.clear();
+            else if (value.action === 'undo') controller.undo();
+            else if (value.action === 'retry') controller.retry();
+        });
         document.addEventListener('ae-read-aloud-player:settings', event => settings(event.detail?.settings));
         document.addEventListener('click', event => {
-            if (automaticClick || !contextAvailable()) return;
+            if (automaticClick || !initialized || !contextAvailable()) return;
             const action = adapter.clickKind(event.target);
             if (action?.type === 'read' && action.button.getAttribute('aria-pressed') !== 'true') {
-                dispatch(INTENT_EVENT, { responseId: action.id, requestId: null });
-                controller.manualStart(action.id);
+                scan();
+                const value = controller.getSnapshot();
+                const busy = ['starting', 'playing', 'paused'].includes(value.state);
+                if (busy && value.current?.id !== action.id && controller.enqueue(action.id)) {
+                    // Suppress the page action only after a different response
+                    // was successfully admitted behind current playback.
+                    event.preventDefault();
+                    event.stopImmediatePropagation();
+                } else {
+                    // Keep the original user gesture when idle, restarting the
+                    // current response, or unable to parse a response safely.
+                    controller.manualStart(action.id);
+                    dispatch(INTENT_EVENT, { responseId: action.id, requestId: null });
+                }
             } else if (action?.type === 'cancel') controller.cancelGeneration();
             else if (action?.type === 'generate' && (action.id || adapter.composerHasText())) controller.beginGeneration(action.id);
         }, true);
@@ -452,5 +677,5 @@
         else document.addEventListener('DOMContentLoaded', ready, { once: true });
     }
 
-    return Object.freeze({ createAutoReadController, createChatGPTAdapter, install });
+    return Object.freeze({ createSnippet, createAutoReadController, createChatGPTAdapter, install });
 });

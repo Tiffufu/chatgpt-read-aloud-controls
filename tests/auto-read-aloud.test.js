@@ -326,3 +326,210 @@ test('a placeholder mounted before the submitted user key appears remains eligib
     h.scan([turn('old'),turn('fresh')],{userKey:'user-2'});
     assert.deepEqual(h.starts.map(x=>x.id),['fresh']);
 });
+
+test('explicit selections queue behind paused audio and work with auto read disabled', () => {
+    const h = harness(snapshot([turn('a'), turn('b')]));
+    h.enable(false);
+    h.state('paused', 1, { responseId: 'current' });
+    assert.equal(typeof h.controller.enqueue, 'function');
+    h.controller.enqueue('a');
+    h.controller.enqueue('a');
+    h.controller.enqueue('b');
+    assert.deepEqual(h.controller.getSnapshot().items.map(x => x.id), ['a', 'b']);
+    assert.deepEqual(h.starts, []);
+    h.state('ended', 1);
+    assert.deepEqual(h.starts.map(x => x.id), ['a']);
+    h.state('playing', 2, { responseId: 'a', requestId: h.starts[0].requestId });
+    h.state('ended', 2);
+    assert.deepEqual(h.starts.map(x => x.id), ['a', 'b']);
+});
+
+test('queue editing changes playback order and Undo restores only valid responses', () => {
+    const h = harness(snapshot([turn('a'), turn('b'), turn('c')]));
+    h.state('paused', 1);
+    assert.equal(typeof h.controller.enqueue, 'function');
+    ['a', 'b', 'c'].forEach(id => h.controller.enqueue(id));
+    h.controller.move('c', -1);
+    h.controller.reorder('b', 'a');
+    assert.deepEqual(h.controller.getSnapshot().items.map(x => x.id), ['b', 'a', 'c']);
+    h.controller.remove('a');
+    h.controller.undo();
+    assert.deepEqual(h.controller.getSnapshot().items.map(x => x.id), ['b', 'a', 'c']);
+    h.controller.clear();
+    h.scan([turn('b'), turn('c')]);
+    h.controller.undo();
+    assert.deepEqual(h.controller.getSnapshot().items.map(x => x.id), ['b', 'c']);
+    h.state('ended', 1);
+    assert.equal(h.starts[0].id, 'b');
+});
+
+test('disabling auto admission preserves explicit selections and removes automatic entries', () => {
+    const h = harness(snapshot([turn('manual')]));
+    h.state('paused', 1);
+    assert.equal(typeof h.controller.enqueue, 'function');
+    h.controller.enqueue('manual');
+    h.submit([turn('manual'), turn('automatic')], { userKey: 'user-2' });
+    h.enable(false);
+    assert.deepEqual(h.controller.getSnapshot().items.map(x => x.id), ['manual']);
+    h.state('ended', 1);
+    assert.equal(h.starts[0].id, 'manual');
+});
+
+test('removing an unconfirmed start cancels it and prevents a late matching event from consuming the next item', () => {
+    const cancelled = [];
+    const h = harness(snapshot([turn('a'), turn('b')]), { cancelled });
+    assert.equal(typeof h.controller.enqueue, 'function');
+    h.controller.enqueue('a');
+    h.controller.enqueue('b');
+    const first = h.starts[0].requestId;
+    h.controller.remove('a');
+    assert.deepEqual(cancelled, [first]);
+    h.state('playing', 1, { responseId: 'a', requestId: first });
+    assert.deepEqual(h.controller.getSnapshot().items.map(x => x.id), ['b']);
+    h.state('ended', 1);
+    assert.equal(h.starts.at(-1).id, 'b');
+});
+
+test('queue snapshots are bounded value objects and cannot mutate scheduler entries', () => {
+    const text = 'Yes. This response contains enough useful context to identify it in the queue.';
+    const h = harness(snapshot([{ ...turn('a'), snippet: text, node: { secret: 'DOM' } }]));
+    h.state('paused', 1);
+    assert.equal(typeof h.controller.enqueue, 'function');
+    h.controller.enqueue('a');
+    const value = h.controller.getSnapshot();
+    assert.equal(value.items[0].snippet, text);
+    assert.equal(value.items[0].node, undefined);
+    value.items[0].id = 'changed';
+    value.items.length = 0;
+    assert.equal(h.controller.getSnapshot().items[0].id, 'a');
+});
+
+test('navigation and regeneration invalidate Undo and stale queued revisions', () => {
+    const h = harness(snapshot([turn('a')]));
+    h.state('paused', 1);
+    assert.equal(typeof h.controller.enqueue, 'function');
+    h.controller.enqueue('a');
+    h.controller.remove('a');
+    h.scan([turn('a', 'complete', 'revised')]);
+    h.controller.undo();
+    assert.equal(h.controller.getSnapshot().items.length, 0);
+    h.controller.enqueue('a');
+    h.controller.clear();
+    h.scan([turn('a')], { conversation: '/c/other' });
+    h.controller.undo();
+    assert.equal(h.controller.getSnapshot().items.length, 0);
+});
+
+test('retry restarts a suspended queue without losing the failed message', () => {
+    const h = harness(snapshot([turn('a')]));
+    assert.equal(typeof h.controller.enqueue, 'function');
+    h.controller.enqueue('a');
+    h.expire();
+    assert.equal(h.controller.getSnapshot().suspended, true);
+    h.controller.retry();
+    assert.equal(h.starts.length, 2);
+    assert.equal(h.controller.getSnapshot().suspended, false);
+});
+
+test('retry replays an interrupted current response before later queued responses', () => {
+    const h = harness(snapshot([turn('a'), turn('b')]));
+    h.controller.enqueue('a');
+    h.state('playing', 1, { responseId: 'a', requestId: h.starts[0].requestId });
+    h.controller.enqueue('b');
+    h.state('error', 1, { responseId: 'a', reason: 'media-network' });
+    h.controller.retry();
+    assert.deepEqual(h.starts.map(x => x.id), ['a', 'a']);
+});
+
+test('clearing a failed queue releases suspension so future responses can start', () => {
+    const h = harness(snapshot([turn('a')]));
+    h.controller.enqueue('a');
+    h.expire();
+    h.controller.clear();
+    h.controller.enqueue('a');
+    assert.equal(h.starts.length, 2);
+    assert.equal(h.controller.getSnapshot().error, '');
+});
+
+test('toggling automatic admission does not orphan a pending manual start', () => {
+    const h = harness(snapshot([turn('a')]));
+    h.controller.enqueue('a');
+    h.enable(false);
+    h.state('playing', 1, { responseId: 'a', requestId: h.starts[0].requestId });
+    assert.equal(h.controller.getSnapshot().items.length, 0);
+    h.state('ended', 1);
+    assert.equal(h.starts.length, 1);
+});
+
+test('selecting a suspended queued response manually retries it without a drawer', () => {
+    const h = harness(snapshot([turn('a')]));
+    h.controller.enqueue('a');
+    h.expire();
+    h.controller.enqueue('a');
+    assert.equal(h.starts.length, 2);
+    assert.equal(h.controller.getSnapshot().suspended, false);
+});
+
+test('an explicit selection promotes an automatically queued response to a manual entry', () => {
+    const h = harness();
+    h.state('paused', 1);
+    h.submit([turn('a')], { userKey: 'user-2' });
+    h.controller.enqueue('a');
+    h.enable(false);
+    assert.deepEqual(h.controller.getSnapshot().items.map(x => x.id), ['a']);
+    assert.equal(h.controller.getSnapshot().items[0].source, 'manual');
+});
+
+test('a failed next synthesis request does not requeue the previously finished response', () => {
+    const h = harness(snapshot([turn('a'), turn('b')]));
+    h.controller.enqueue('a');
+    const firstRequest = h.starts[0].requestId;
+    h.state('playing', 1, { responseId: 'a', requestId: firstRequest });
+    h.state('ended', 1, { responseId: 'a', requestId: firstRequest });
+    h.controller.enqueue('b');
+    // A rejected fetch occurs before the player has created the next session.
+    h.state('error', 1, { responseId: 'a', requestId: firstRequest, reason: 'request-failed' });
+    assert.deepEqual(h.controller.getSnapshot().items.map(x => x.id), ['b']);
+    h.controller.retry();
+    assert.deepEqual(h.starts.map(x => x.id), ['a', 'b', 'b']);
+});
+
+test('changing automatic admission preserves retry identity for a playing revised response', () => {
+    const h = harness();
+    h.scan([turn('a', 'generating')], { generating: true });
+    h.scan([turn('a')]);
+    h.state('playing', 1, { responseId: 'a', requestId: h.starts[0].requestId });
+    h.enable(false);
+    h.state('error', 1, { responseId: 'a', reason: 'media-network' });
+    h.controller.retry();
+    assert.deepEqual(h.starts.map(x => x.id), ['a', 'a']);
+});
+
+test('late source removal from a completed response cannot cancel its pending successor', () => {
+    const cancelled = [];
+    const h = harness(snapshot([turn('a'), turn('b')]), { cancelled });
+    h.controller.enqueue('a');
+    h.state('playing', 1, { responseId: 'a', requestId: h.starts[0].requestId });
+    h.controller.enqueue('b');
+    h.state('ended', 1, { responseId: 'a' });
+    const nextRequest = h.starts[1].requestId;
+    h.state('error', 1, { responseId: 'a', reason: 'media-source-unavailable' });
+    assert.deepEqual(cancelled, []);
+    assert.equal(h.controller.getSnapshot().suspended, false);
+    h.state('playing', 2, { responseId: 'b', requestId: nextRequest });
+    assert.equal(h.controller.getSnapshot().items.length, 0);
+});
+
+test('snippets continue past tiny introductions and cut long openings at whole words', () => {
+    const { createSnippet } = load();
+    assert.equal(typeof createSnippet, 'function');
+    assert.equal(createSnippet('Yes. This is enough context to identify the response. Another sentence.'),
+        'Yes. This is enough context to identify the response.');
+    assert.equal(createSnippet('The queue keeps your upcoming responses in one place. Another sentence.'),
+        'The queue keeps your upcoming responses in one place.');
+    assert.equal(createSnippet('Short.'), 'Short.');
+    assert.equal(createSnippet('Dude, the whole point is to keep listening while new responses come in and still be able to move things around without losing your place.'),
+        'Dude, the whole point is to keep listening while new responses come in and still be able to move things…');
+    assert.equal(createSnippet('   Hello\n\nworld.  '), 'Hello world.');
+    assert.equal([...createSnippet('🎧'.repeat(200))].length, 105);
+});
