@@ -45,4 +45,4 @@ queue, and remove downloaded files through your operating system. Settings can
 be cleared through the extension's local storage or by removing the extension.
 
 When reporting a problem, share the relevant error and reproduction steps while
-omitting private conversation content. See [usage and troubleshooting](docs/USAGE.md).
+omitting private conversation content. See [usage and troubleshooting](https://github.com/Tiffufu/chatgpt-read-aloud-controls/blob/main/docs/USAGE.md).

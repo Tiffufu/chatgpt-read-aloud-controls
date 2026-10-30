@@ -36,3 +36,6 @@ Temporary Items
 
 # Keep local planning/session notes out of the public tree
 docs/superpowers/
+
+# Generated release packages
+dist/

@@ -100,3 +100,21 @@ Player logs use `[AE Player]`. Avoid publishing private response text in bug rep
 ## Documentation images
 
 Follow [images/README.md](../images/README.md) to refresh actual UI captures. Keep the original project and contributor attribution in [CREDITS.md](../CREDITS.md) when replacing legacy visuals.
+
+## Prepare a release
+
+1. Update `manifest.json` and `CHANGELOG.md` with the release version.
+2. Run the automated checks and complete the live smoke check above.
+3. Commit and push the release changes; confirm CI passes for that commit.
+4. Run `python3 scripts/package-extension.py` with Python 3. The packager validates
+   manifest assets and ZIP integrity and writes `dist/chatgpt-read-aloud-controls-unpacked.zip`.
+   The archive includes runtime files, icons, install instructions, privacy, and
+   license notices. Repository history, tests, documentation artwork, and local
+   files are excluded. File order and ZIP timestamps are deterministic.
+5. Extract the ZIP into a temporary folder and check every manifest path. Use that
+   folder for an unpacked-install smoke check in Chrome.
+6. Create a GitHub release tagged `v<version>` at the verified commit and attach
+   the ZIP. Keep the asset name stable so the README's latest-download link works.
+
+GitHub's automatic source archives contain the repository. The attached unpacked
+ZIP is the smaller installation download intended for extension users.

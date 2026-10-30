@@ -23,13 +23,17 @@ This extension is independently maintained and is not affiliated with OpenAI.
 
 ## Install or update
 
-1. [Download the repository ZIP](https://github.com/Tiffufu/chatgpt-read-aloud-controls/archive/refs/heads/main.zip) and extract it, or clone this repository.
+**[Download the unpacked extension](https://github.com/Tiffufu/chatgpt-read-aloud-controls/releases/latest/download/chatgpt-read-aloud-controls-unpacked.zip)** · [Release notes](https://github.com/Tiffufu/chatgpt-read-aloud-controls/releases/latest)
+
+1. Download the ZIP above, extract it, and move the `chatgpt-read-aloud-controls` folder to a permanent location.
 2. Open `chrome://extensions` in Chrome or another Chromium-based browser.
 3. Enable **Developer mode**, select **Load unpacked**, and choose the extracted repository folder containing `manifest.json`.
 4. Refresh open `chatgpt.com` tabs.
 5. Start **Read Aloud** on a ChatGPT response. The player appears automatically.
 
-When updating an existing unpacked installation, update its files, click **Reload** on the extension card, and refresh ChatGPT. Tabs left open across an extension reload need refreshing to use the new scripts.
+To update, download the latest release and replace the files in that same folder. Click **Reload** on the extension card and refresh ChatGPT. Unpacked installations require manual updates. See [installation instructions](INSTALL.md).
+
+Developers can also [download the source ZIP](https://github.com/Tiffufu/chatgpt-read-aloud-controls/archive/refs/heads/main.zip) or clone the repository.
 
 ## The player
 

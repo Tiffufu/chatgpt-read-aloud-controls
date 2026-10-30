@@ -1,8 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 — October 30, 2026
 
 ### Added
+
+- Downloadable unpacked-extension ZIP with installation and update instructions.
 
 - Editable reading queue in each tab, with response excerpts, source navigation,
   drag and arrow reordering, removal, Clear, Retry, and Undo.
@@ -29,6 +31,3 @@
 - Preserved original-project credit and completed third-party license notices.
 - Consolidated public validation notes and removed internal session material and
   unused legacy promotional images from the current tree.
-
-Changes above have not been assigned a release tag. The unpacked extension's
-manifest version remains `0.2.1` until a versioned release is prepared.
