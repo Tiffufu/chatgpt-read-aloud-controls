@@ -49,7 +49,7 @@ React or an icon package as a runtime dependency.
 
 Repository: https://github.com/phosphor-icons/react
 
-The included Phosphor license notice is in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Full license notices for Phosphor, Heroicons, and the inherited ChatGPT Audio Enhancer code are included in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Non-affiliation
 

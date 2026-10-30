@@ -1,6 +1,6 @@
 # Long audio investigation and validation
 
-Validated October 27, 2026. The implementation is included on `codex/auto-read-aloud`.
+Validated October 27, 2026. The implementation is integrated into `main`.
 
 ## Report and root cause
 

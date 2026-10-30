@@ -1,0 +1,45 @@
+name: Checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Runtime tests
+        run: node --test tests/*.test.js
+      - name: JavaScript syntax
+        run: |
+          for file in src/js/*.js; do
+            node --check "$file" || exit
+          done
+      - name: Manifest assets
+        run: |
+          node <<'JS'
+          const fs = require('node:fs');
+          const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
+          const paths = [
+            manifest.action.default_popup,
+            ...Object.values(manifest.icons),
+            ...Object.values(manifest.action.default_icon),
+            ...manifest.content_scripts.flatMap(script => [...(script.js || []), ...(script.css || [])])
+          ];
+          for (const path of paths) {
+            if (!fs.existsSync(path)) throw new Error(`Missing manifest asset: ${path}`);
+          }
+          JS

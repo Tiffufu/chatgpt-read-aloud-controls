@@ -71,6 +71,12 @@ Open the extension icon to set skip intervals, default speed, theme, and **Autom
   <img src="images/settings-light.jpg" alt="Settings popup with independent skip intervals, default playback speed, theme, and automatic reading checkbox" width="300">
 </picture>
 
+## Privacy
+
+Settings are stored locally. Each tab keeps its queue and captured audio in memory;
+the extension has no developer-operated server or analytics. See the
+[privacy statement](PRIVACY.md) for page access, storage, downloads, and controls.
+
 ## Playback notes
 
 Pause becomes available after the captured response is ready for resumable playback. The first Pause transfers control to that copy at the current position; use the floating player afterward, since ChatGPT’s native indicator may appear idle.
@@ -82,6 +88,9 @@ Seeking and skipping are limited to available audio ranges. Download stays disab
 The extension uses plain Manifest V3 HTML, CSS, and JavaScript. There is no build step, runtime framework, or package installation. Its only extension permission is `storage`.
 
 - [Usage and troubleshooting](docs/USAGE.md)
+- [Privacy](PRIVACY.md)
+- [Changelog](CHANGELOG.md)
+- [Recorded validation and limits](docs/VALIDATION.md)
 - [Development, previews, and verification](docs/DEVELOPMENT.md)
 - [Codebase guide](docs/CODEBASE.md)
 - [Architecture and compatibility boundaries](docs/ARCHITECTURE.md)

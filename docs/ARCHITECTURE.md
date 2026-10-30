@@ -143,8 +143,8 @@ Debug logs use the `[AE Player]` prefix and must stay low-volume. Do not add def
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for runnable commands and browser fixture
 paths. Current user-facing controls and screenshots are in [USAGE.md](USAGE.md).
-The dated validation reports document earlier verification runs; they do not
-replace checking a newly changed build against live ChatGPT.
+The [validation summary](VALIDATION.md) records earlier checks and their limits;
+it does not replace checking a changed build against live ChatGPT.
 
 Before shipping changes:
 
@@ -156,7 +156,7 @@ Before shipping changes:
 - Load the unpacked extension and reload a fresh `chatgpt.com` tab.
 - Start Read Aloud and confirm the player appears.
 - Confirm a long streamed response gains a stable total before playback completes and seeks only within loaded ranges.
-- In the Chrome test profile, let a loaded timeline reach a nonzero position, Pause, wait for UI sync, and confirm the bar and both skip buttons remain enabled at that position.
+- In a Chrome profile with the unpacked extension loaded, let a loaded timeline reach a nonzero position, Pause, wait for UI sync, and confirm the bar and both skip buttons remain enabled at that position.
 - Resume and confirm playback continues from the preserved position; then repeat after scrubbing and exercise both skip buttons.
 - Start another Read Aloud response and confirm the prior captured player stops without pausing page competitors.
 - Confirm every supported speed updates both listening-time labels without changing seekbar progress.
@@ -165,4 +165,4 @@ Before shipping changes:
 - Confirm the console is not flooded with extension-origin messages or interrupted-play errors.
 - Confirm any main-world fallback defaults still match `src/js/player-settings.js`.
 
-The most recent completed live run is recorded in [`LIVE_VALIDATION_2026-10-07.md`](LIVE_VALIDATION_2026-10-07.md).
+Recorded validation results and remaining limits are summarized in [VALIDATION.md](VALIDATION.md).

@@ -28,6 +28,10 @@ node -e 'JSON.parse(require("node:fs").readFileSync("manifest.json", "utf8"))'
 git diff --check
 ```
 
+GitHub Actions runs the Node suite, production JavaScript syntax checks, and manifest
+asset validation on Node 22 and 24 for pushes and pull requests. No package install
+is required. Live browser checks remain part of the manual smoke check below.
+
 ## Local browser fixtures
 
 Start a local server from the repository root:
@@ -71,7 +75,7 @@ After runtime changes, reload the unpacked extension and refresh a ChatGPT tab:
 9. Check light/dark appearance, long titles, narrow viewports, keyboard controls, and download states.
 10. Check failure recovery and unexpected console errors. Use actual speech input separately when validating dictated submissions.
 
-Local fixtures cannot establish compatibility with ChatGPT’s current production DOM, network behavior, autoplay policy, or microphone path. Historical validation reports are dated snapshots, not a guarantee for later site changes.
+Local fixtures cannot establish compatibility with ChatGPT’s current production DOM, network behavior, autoplay policy, or microphone path. The [validation summary](VALIDATION.md) records dated results and practical limits.
 
 ## Maintainability
 

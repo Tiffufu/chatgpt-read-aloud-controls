@@ -69,6 +69,4 @@ Use sample responses or explicitly approved public content. Do not publish
 private chats, account details, or browser profile UI. A local production-UI
 capture is not a screenshot of the installed extension on live ChatGPT.
 
-The legacy `small-promo-tile-440x280.png` and
-`marquee-promo-tile-1400x560.png` remain historical promotional assets, outside
-current documentation. Original credit remains in [CREDITS.md](../CREDITS.md).
+Original project credit remains in [CREDITS.md](../CREDITS.md).

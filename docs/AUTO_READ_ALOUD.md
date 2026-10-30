@@ -116,27 +116,12 @@ new responses, queue progression, pause/resume, close, background playback, and
 independent tabs. Test dictated submission with a real speaker; automated typed
 submission does not establish microphone-path validation.
 
-## Implementation history
+## Regression coverage
 
-The notes below describe earlier development stages. The current queue and quiet
-player are integrated into `main`; see the [usage guide](USAGE.md) for current
-screenshots and [development guide](DEVELOPMENT.md) for verification instructions.
+The Node and browser fixtures cover history hydration, stale revisions, initial
+conversation URL assignment, cancellation, assistant-only excerpts, empty replies,
+fast responses, and settings changes racing startup reads. A native generation
+control takes precedence over a turn container marked complete while streaming.
 
-- Implementation scope: automatic Read Aloud with per-tab queues.
-- The initial automatic reader was developed on `codex/auto-read-aloud`.
-  That stage needed no worktree or dependency installation and passed its
-  original 39 runtime tests.
-- User clarification: tab focus and history loading must never start narration;
-  an existing controller retains its playback state.
-- Automated tests were added before the queue and lifecycle implementation.
-  Real-browser fixtures reproduced and verified corrections to assistant-only
-  extraction, user-only turns, empty replies, and fast-response detection.
-- The independent read-only review identified history admissions, stale revision
-  replay, incorrect first-URL adoption, and late cancellation. Regression tests
-  reproduced each finding before its correction. No minor findings were deferred.
-- The current live interface uses a composer button labeled `Stop`, and can keep
-  a turn marked `complete` while streaming. Native generation state takes
-  precedence over that container attribute.
-- Startup storage reads cannot overwrite a newer settings change. Browser
-  integration fixtures exercise the actual isolated runtime with real DOM events,
-  MutationObservers, and a controlled extension-storage boundary.
+Current verification instructions are in [DEVELOPMENT.md](DEVELOPMENT.md), with
+recorded results and practical limits in [VALIDATION.md](VALIDATION.md).

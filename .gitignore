@@ -33,3 +33,6 @@ Temporary Items
 
 # Local implementation and design companion scratch files
 .superpowers/
+
+# Keep local planning/session notes out of the public tree
+docs/superpowers/
