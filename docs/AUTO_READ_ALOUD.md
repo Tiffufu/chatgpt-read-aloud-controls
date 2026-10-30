@@ -21,8 +21,10 @@ new permissions, services, or dependencies.
   when automatic reading is disabled. Duplicate selections are ignored. The current
   response's pressed native control can still perform its native stop action.
 - The attached drawer shows the current response and ordered upcoming snippets.
-  Its oval toggle sits beside Download. Drag or arrow buttons reorder entries;
-  Remove and Clear upcoming support one-level Undo for valid responses. Source
+  Its toggle sits beside Download and counts the current response plus waiting
+  responses. The Up next count includes only waiting entries; ended responses and
+  duplicate retry entries are excluded. Drag or arrow buttons reorder entries;
+  Remove and Clear support one-level Undo for valid responses. Source
   previews scroll to and briefly highlight their original messages.
 - Minimizing hides the drawer while retaining its expansion preference. The drawer
   starts closed and retains its preference through player-session rebuilds.
@@ -46,9 +48,11 @@ builds its floating controls through the existing playback path.
 
 `reading-queue.js` is a separate main-world presentation module. It receives only
 bounded value snapshots, sends commands, and never starts audio or scans ChatGPT.
-The controller exposes explicit admission and editing operations. Native clicks
-are deferred to a cancellable microtask because a browser suppresses a reentrant
-`.click()` on the button whose user click is being intercepted.
+The controller exposes explicit admission and editing operations. Idle user clicks
+pass through unchanged. Scheduled native clicks are deferred to a cancellable
+microtask because a browser suppresses a reentrant `.click()` on the button whose
+user click is being intercepted. A busy selection is suppressed only after a
+different response has successfully joined the queue.
 
 The private DOM event contract is:
 
@@ -78,7 +82,8 @@ Recoverable playback failures appear in the popup's status area. They are not
 written as repeated console warnings. The status distinguishes an unavailable
 native button, a 15-second playback confirmation timeout, a rejected audio
 request, browser-blocked playback, and media network/decoder/format failures.
-The queue remains suspended until manual recovery or a settings reset.
+The queue remains suspended until Retry, a successful manual recovery, clearing
+the failed queue, or a settings reset.
 
 Reloading or updating the extension invalidates its isolated scripts in tabs
 that were already open. The settings bridge stops storage work when that happens
@@ -111,11 +116,16 @@ new responses, queue progression, pause/resume, close, background playback, and
 independent tabs. Test dictated submission with a real speaker; automated typed
 submission does not establish microphone-path validation.
 
-## Implementation record
+## Implementation history
+
+The notes below describe earlier development stages. The current queue and quiet
+player are integrated into `main`; see the [usage guide](USAGE.md) for current
+screenshots and [development guide](DEVELOPMENT.md) for verification instructions.
 
 - Implementation scope: automatic Read Aloud with per-tab queues.
-- Work is on `codex/auto-read-aloud` in the supplied checkout; no worktree or
-  dependency installation was needed. The original 39 runtime tests passed.
+- The initial automatic reader was developed on `codex/auto-read-aloud`.
+  That stage needed no worktree or dependency installation and passed its
+  original 39 runtime tests.
 - User clarification: tab focus and history loading must never start narration;
   an existing controller retains its playback state.
 - Automated tests were added before the queue and lifecycle implementation.

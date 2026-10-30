@@ -6,7 +6,7 @@ Read Aloud Controls for ChatGPT is a Manifest V3 extension with a popup settings
 
 ### `manifest.json`
 
-Registers extension metadata, popup, icons, the isolated settings bridge, the shared main-world settings, timeline, and captured-playback helpers, and the ChatGPT player script. The player script runs at `document_start` in the page's main world so it can observe page-created audio elements and wrap `window.fetch`. The bridge runs in the default isolated world so it can access extension APIs.
+Registers extension metadata, popup, icons, isolated settings/automatic-reading scripts, main-world media/player/drawer scripts, and declarative player CSS. The player script runs at `document_start` in the page's main world so it can observe page-created audio elements and wrap `window.fetch`. The bridge and queue scheduler run in the isolated world, which can access extension APIs.
 
 ### `src/js/player-settings.js`
 
@@ -15,6 +15,14 @@ Defines the storage key, setting defaults, playback speed options, accepted valu
 ### `src/js/settings-bridge.js`
 
 Reads `chrome.storage.local`, listens for popup updates, accepts scoped player-originated settings update requests, and forwards raw settings into the page through scoped DOM `CustomEvent`s. This avoids polluting ChatGPT's global `window.postMessage` channel while keeping extension APIs out of the main-world player script.
+
+### `src/js/auto-read-aloud.js`
+
+Owns the per-tab queue scheduler and the ChatGPT DOM adapter. The adapter finds response actions, detects generation, derives response identity and excerpts, and reveals sources. The controller owns eligibility, manual/automatic admission, ordering, revisions, cancellation, Retry, and Undo. Idle native Read Aloud clicks pass through unchanged; a different response selected during busy playback is intercepted only after successful admission.
+
+### `src/js/reading-queue.js`
+
+Renders the attached drawer and its numeric toggle from value snapshots. Sends semantic edit/reveal commands without scanning ChatGPT or starting audio. Counts current plus waiting responses, deduplicates retry entries, preserves drawer preference and keyboard focus, and defers snapshots while a native drag source is active.
 
 ### `src/js/media-timeline.js`
 
@@ -62,7 +70,11 @@ Important helpers:
 
 ### `src/popup.html`, `src/css/popup.css`, and `src/js/popup.js`
 
-The popup owns persistent settings for skip intervals, default playback speed, and theme. It writes settings to `chrome.storage.local`; the isolated settings bridge observes storage changes and forwards raw settings into active ChatGPT tabs with extension-scoped DOM events. Popup code should consume `window.AEPlayerSettings` and fail clearly if the shared settings module is missing.
+The popup owns persistent settings for skip intervals, default playback speed, theme, and automatic reading. It writes settings to `chrome.storage.local`; the isolated settings bridge observes storage changes and forwards raw settings into active ChatGPT tabs with extension-scoped DOM events. Popup code should consume `window.AEPlayerSettings` and fail clearly if the shared settings module is missing.
+
+### `src/css/player.css` and `src/css/reading-queue.css`
+
+Declaratively injected presentation scoped to `#ae_enhanced_player`, with theme variables supplied by the runtime. These files own expanded/minimized layout, responsive sizing, queue rows, focus outlines, and timeline appearance. Expanded and minimized views reuse the same transport elements; keep ChatGPT selectors out of the styles and drawer.
 
 ### `preview.html`
 
@@ -92,7 +104,7 @@ Update `playerThemes` in `src/js/content-script.js`. Theme values are applied as
 
 ### Adjust timeline appearance
 
-Update `ensurePlayerStyles()` for browser range-input track and thumb styling. Keep WebKit and Firefox rules in sync.
+Update `src/css/player.css` for browser range-input track and thumb styling. Keep WebKit and Firefox rules in sync. Drawer appearance belongs in `src/css/reading-queue.css`.
 
 ### Update audio endpoint detection
 
@@ -104,4 +116,4 @@ Icon buttons are rendered from semantic state instead of inferred DOM styles. `r
 
 ## Verification
 
-Before shipping runtime changes, run the checklist in `docs/ARCHITECTURE.md`.
+See [development and verification](DEVELOPMENT.md) for commands, browser fixtures, and live smoke checks. Refresh documentation images using [images/README.md](../images/README.md). Historical validation reports remain dated records.

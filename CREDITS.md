@@ -6,7 +6,9 @@ Read Aloud Controls for ChatGPT began as a fork of **Audio Player for ChatGPT** 
 
 Original project: https://github.com/ian-speckart/chatgpt-audio-player
 
-The original project established the core idea of adding playback controls to ChatGPT's Read Aloud feature. This fork preserves that lineage while expanding the project into a settings-driven floating controls extension with configurable skip intervals, theme settings, capture-aware downloads, preview tooling, and a hardened extension bridge.
+The original project established the core idea of adding playback controls to ChatGPT's Read Aloud feature. This independently maintained derivative preserves that lineage. Its current implementation adds a redesigned expanded/minimized player, editable per-tab reading queues, optional automatic reading, configurable skip intervals, theme settings, resumable captured playback, stable timelines, capture-aware downloads, preview tooling, and an isolated settings bridge.
+
+The screenshots in the README and usage guide show this extension's production UI, captured locally with sample responses. They replace the inherited upstream README image. The original authors and contributors are credited below.
 
 ## Upstream contributors
 
@@ -34,11 +36,20 @@ License: https://github.com/drengskapur/chatgpt-audio-enhancer/blob/main/LICENSE
 
 ## Icons
 
-This project uses SVG icons from Heroicons.
+Some player SVG icons originate from Heroicons.
 
 Website: https://heroicons.com/
 Repository: https://github.com/tailwindlabs/heroicons
 License: https://github.com/tailwindlabs/heroicons/blob/master/LICENSE
+
+The current skip controls use the regular ArrowClockwise and ArrowCounterClockwise
+paths from **Phosphor Icons**, distributed under the MIT license, extracted from
+`@phosphor-icons/react` 2.1.10. The extension includes the SVG paths without adding
+React or an icon package as a runtime dependency.
+
+Repository: https://github.com/phosphor-icons/react
+
+The included Phosphor license notice is in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Non-affiliation
 

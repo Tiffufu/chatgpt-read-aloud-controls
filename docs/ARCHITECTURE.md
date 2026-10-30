@@ -7,8 +7,8 @@ This extension is intentionally plain Manifest V3 HTML/CSS/JavaScript. The core 
 The extension has three runtime areas:
 
 - **Popup**: `src/popup.html`, `src/css/popup.css`, and `src/js/popup.js`. This code owns the settings form and writes validated settings to `chrome.storage.local`.
-- **Isolated bridge**: `src/js/settings-bridge.js`. This code can use extension APIs. It reads storage and forwards raw settings to the page through scoped DOM `CustomEvent`s.
-- **Main-world player**: `src/js/content-script.js`. This code runs in the page's main world so it can observe page-created audio elements and wrap `window.fetch` for Read Aloud capture.
+- **Isolated runtime**: `src/js/settings-bridge.js` reads storage and forwards raw settings through scoped DOM `CustomEvent`s. `src/js/auto-read-aloud.js` runs alongside it, owning the ChatGPT adapter and per-tab queue scheduler. This world can use extension APIs.
+- **Main-world player**: `src/js/content-script.js` observes page-created audio elements and wraps `window.fetch` for Read Aloud capture. It mounts the presentation-only `src/js/reading-queue.js` drawer. Layout lives in the declaratively injected player and queue stylesheets.
 
 Do not replace the bridge with `window.postMessage`. ChatGPT also listens for global page messages, and extension messages on that channel can create console spam or application-side misclassification.
 
@@ -140,6 +140,11 @@ localStorage.removeItem('ae_debug')
 Debug logs use the `[AE Player]` prefix and must stay low-volume. Do not add default console logging for normal playback.
 
 ## Verification checklist
+
+See [DEVELOPMENT.md](DEVELOPMENT.md) for runnable commands and browser fixture
+paths. Current user-facing controls and screenshots are in [USAGE.md](USAGE.md).
+The dated validation reports document earlier verification runs; they do not
+replace checking a newly changed build against live ChatGPT.
 
 Before shipping changes:
 

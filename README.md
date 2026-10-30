@@ -1,195 +1,80 @@
 # Read Aloud Controls for ChatGPT
 
-A browser extension that adds a floating control panel for ChatGPT Read Aloud. It provides playback controls, a seek bar, configurable skip intervals, speed control, theme settings, and audio download support when capture completes.
+Listen to ChatGPT with a floating player and a reading queue you can manage. Pause and resume, seek through a response, change speed, and line up what to hear next.
 
-This project is not affiliated with OpenAI.
+![Current dark player with its attached reading queue: one response playing and three waiting](images/reading-queue-dark.jpg)
 
-![Screenshot of the extension](images/promo-screenshot.png)
+*Production extension UI captured locally with sample responses. [Capture notes](images/README.md).*
 
-## Features
+This extension is independently maintained and is not affiliated with OpenAI.
 
-- Optional automatic Read Aloud for newly completed responses, with an independent queue in each tab.
-- Attached reading queue with response previews, drag or arrow reordering, removal, clear, and Undo.
-- Select another response's Read Aloud to queue it without interrupting current playback, even with automatic reading off.
-- Floating player that appears when ChatGPT Read Aloud starts.
-- Play and pause controls.
-- Resumable first-Pause handoff to an extension-owned copy after capture is seek-ready.
-- Configurable skip-back and skip-forward intervals.
-- Stable timeline from native metadata or completed-capture metadata when ChatGPT streams an indefinite duration.
-- Safe seeking and skip controls limited to the ranges ChatGPT has made seekable.
-- Playback speeds: `0.75x`, `1x`, `1.25x`, `1.5x`, and `2x`.
-- Current and total listening-time labels adjusted for the selected speed.
-- Conversation-aware track title with long-title truncation.
-- Download button for captured Read Aloud audio responses, enabled only after capture completes.
-- Theme setting: follow system, light, or dark.
-- Draggable, collapsible player.
-- Close-to-pause behavior.
-- Local preview harness for UI checks without a live ChatGPT audio stream.
+## What it does
 
-## Install for local use
+- **Manage your listening queue.** Select another response’s Read Aloud to add it without interrupting playback. Reorder by dragging or using arrows, remove entries, clear upcoming responses, and Undo a removal.
+- **Read new responses automatically.** An optional setting adds newly completed responses to the queue. Each tab has its own queue; opening old conversations does not start narration.
+- **Control playback.** Play, pause, seek, and skip backward or forward with independently configurable intervals from 1–300 seconds.
+- **Choose your pace.** Use 0.75×, 1×, 1.25×, 1.5×, or 2× speed. Both time labels reflect listening time at the selected speed.
+- **Keep the player small.** Drag it out of the way or minimize it. The same playback controls stay available, and expanding restores the drawer’s previous state.
+- **Download completed audio.** The download button enables once the response has finished capturing.
+- **Choose a theme.** Follow the system appearance or select light or dark.
 
-1. Download or clone this repository.
+## Install or update
+
+1. [Download the repository ZIP](https://github.com/Tiffufu/chatgpt-read-aloud-controls/archive/refs/heads/main.zip) and extract it, or clone this repository.
 2. Open `chrome://extensions` in Chrome or another Chromium-based browser.
-3. Enable **Developer mode**.
-4. Select **Load unpacked**.
-5. Choose this repository folder.
-6. Reload any open `chatgpt.com` tabs.
-7. Start ChatGPT Read Aloud.
+3. Enable **Developer mode**, select **Load unpacked**, and choose the extracted repository folder containing `manifest.json`.
+4. Refresh open `chatgpt.com` tabs.
+5. Start **Read Aloud** on a ChatGPT response. The player appears automatically.
 
-The player appears automatically after ChatGPT starts a Read Aloud audio stream.
+When updating an existing unpacked installation, update its files, click **Reload** on the extension card, and refresh ChatGPT. Tabs left open across an extension reload need refreshing to use the new scripts.
 
-Pause is briefly unavailable while the extension prepares a seekable copy of the captured response. Once ready, the first Pause preserves the current position by transferring control to that copy before stopping ChatGPT's fragile page stream. The floating player then remains authoritative for Play, Pause, seek, skip, and speed; ChatGPT's native Read Aloud button may appear idle after this handoff.
+## The player
 
-The captured-playback repair was live-validated in the Chrome test profile and confirmed again after reloading the final build on October 7, 2026. See [`docs/LIVE_VALIDATION_2026-10-07.md`](docs/LIVE_VALIDATION_2026-10-07.md) for the exercised controls, automated checks, and remaining preview-only limitation.
+With the drawer closed, the player keeps the playback controls and timeline in view:
 
-## Popup settings
+![Expanded light player with speed, skip, playback, download, queue, and timeline controls](images/player-expanded-light.jpg)
 
-Open the extension icon to configure player settings:
+Minimizing hides the timeline and drawer while keeping the same skip intervals and Play/Pause control:
 
-- **Skip back seconds**: number of seconds moved by the back button. Fresh installs default to 15 seconds.
-- **Skip forward seconds**: number of seconds moved by the forward button. Fresh installs default to 15 seconds.
-- **Default playback speed**: the speed applied to active and future Read Aloud playback.
-- **Theme**: follow system, light, or dark.
+![Minimized light player retaining skip back, Play, skip forward, expand, and close controls](images/player-minimized-light.jpg)
 
-Settings are saved with `chrome.storage.local` and forwarded to active ChatGPT tabs by the extension settings bridge. Defaults, speed options, limits, and validation are defined only in `src/js/player-settings.js`; other scripts consume that shared settings contract rather than carrying duplicate defaults.
+## The reading queue
 
-Check **Automatically read new responses aloud** to read completed replies without
-pressing Read Aloud. The setting starts off and applies across ChatGPT tabs;
-each tab keeps its own queue. Opening or focusing an existing conversation does
-not narrate its history. Pause holds the queue, and closing the controller clears
-that tab's waiting responses. Turning the setting off removes automatically
-added entries while keeping your explicit selections and audio already playing.
-Queues are discarded on navigation or reload.
+Open the queue beside Download to see the current response and what is waiting. **The button counts the current response plus waiting responses**: `4` means one current response and three waiting. The drawer labels only those three as **Up next**.
 
-Use the queue button beside Download to show the reading list. Its number counts
-the current response plus waiting responses. Clicking a
-preview scrolls to and briefly highlights its source message; it does not change
-the playback order. Drag a row by its handle or use its arrow buttons to reorder.
-Remove or clear upcoming responses and use Undo to restore valid entries. Minimize
-hides the drawer and timeline together; expanding remembers the drawer's state.
-Start failures appear in the drawer with Retry as well as in the popup status.
-The queue stores response references and short snippets, and requests audio only
-when a response reaches its turn. There is no audio prefetch or persistent history.
+Clicking a response preview scrolls to and briefly highlights its source in the chat. It does not start playback or change the order. Pause holds your place; new responses can still join the end.
 
-After updating the unpacked extension, reload it in Chrome's extension manager
-and refresh the ChatGPT tabs where you want to use the new option. See
-[`docs/AUTO_READ_ALOUD.md`](docs/AUTO_READ_ALOUD.md) for the runtime contract and
-verification details.
+![Light reading queue with a paused response and three upcoming responses](images/reading-queue-light.jpg)
 
-Automatic reading can intermittently fail to start on some ChatGPT tabs. The
-conditions are still being investigated; native Read Aloud remains the manual
-fallback. This branch includes that known limitation.
+Queues stay in memory separately in each tab. They store response references and short excerpts, without prefetching queued audio. Closing the player clears the queue; changing conversations or reloading discards pending entries. Turning automatic reading off removes automatic entries while preserving your explicit selections and current audio.
 
-## Download behavior
+See the [usage guide](docs/USAGE.md) for queue controls, settings, downloads, and recovery.
 
-The download button stays visible but disabled while audio capture is still loading. It enables only when the active Read Aloud response has fully completed capture. This avoids accidental partial downloads. Starting a download does not change the icon; Chrome's own download UI provides confirmation while the player keeps the control stable and repeatable.
+## Settings
 
-The downloaded file is built from the audio response captured while ChatGPT is streaming Read Aloud audio. The extension does not depend on re-fetching the audio element source after playback.
+Open the extension icon to set skip intervals, default speed, theme, and **Automatically read new responses aloud**. Automatic reading starts off; both skip intervals default to 15 seconds. Settings are saved locally and apply to active ChatGPT tabs.
 
-## Local preview
+<img src="images/settings.jpg" alt="Current settings popup with independent skip intervals, default playback speed, theme, and automatic reading checkbox" width="300">
 
-Open `preview.html` directly in a browser to check the injected player UI without loading ChatGPT.
+## Playback notes
 
-The preview exercises layout, theme, time labels, speed, and download states. It does not simulate completion of the detached captured-player readiness lifecycle, so its Play/Pause control can remain in `Preparing resumable playback`. Use a live ChatGPT Read Aloud response for pause/resume validation.
+Pause becomes available after the captured response is ready for resumable playback. The first Pause transfers control to that copy at the current position; use the floating player afterward, since ChatGPT’s native indicator may appear idle.
 
-For an interactive local queue preview, serve the repository and open
-`tests/fixtures/reading-queue-preview.html`. It runs the actual player and queue
-against a local synthetic service boundary with silent WAV media. The UI checks
-are in `tests/fixtures/reading-queue.html`; native-click and queue integration
-checks are in `tests/fixtures/auto-read-runtime.html`. Keyboard focus and compact
-player regressions are in `tests/fixtures/quiet-player.html`. These do not replace live
-ChatGPT extension validation.
+Seeking and skipping are limited to available audio ranges. Download stays disabled until capture completes. If automatic playback fails, check the drawer or popup for an error and try **Retry** or start native Read Aloud manually. ChatGPT site changes can affect response detection and playback; see [troubleshooting](docs/USAGE.md#troubleshooting).
 
-Useful query parameters:
+## Development and documentation
 
-```text
-preview.html?ae-theme=dark&ae-duration=420&ae-current=80&ae-rate=2&ae-back=10&ae-forward=15&ae-download=ready
-```
+The extension uses plain Manifest V3 HTML, CSS, and JavaScript. There is no build step, runtime framework, or package installation. Its only extension permission is `storage`.
 
-Supported preview parameters:
+- [Usage and troubleshooting](docs/USAGE.md)
+- [Development, previews, and verification](docs/DEVELOPMENT.md)
+- [Codebase guide](docs/CODEBASE.md)
+- [Architecture and compatibility boundaries](docs/ARCHITECTURE.md)
+- [Automatic reading and queue contract](docs/AUTO_READ_ALOUD.md)
+- [Screenshot sources and refresh instructions](images/README.md)
 
-- `ae-theme=light|dark`
-- `ae-duration=<seconds>`
-- `ae-current=<seconds>`
-- `ae-rate=<supported speed>`
-- `ae-back=<seconds>`
-- `ae-forward=<seconds>`
-- `ae-download=loading|ready|failed`
+## Attribution and license
 
-## Development notes
+Originally forked from [Ian Speckart’s Audio Player for ChatGPT](https://github.com/ian-speckart/chatgpt-audio-player). The player, queue, settings, and playback handling have since changed substantially. See [CREDITS.md](CREDITS.md) for the original project and contributors, and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for included icon notices.
 
-The extension intentionally uses plain Manifest V3 HTML, CSS, and JavaScript. There is no bundler or package manager.
-
-Important runtime files:
-
-```text
-manifest.json             Chrome extension manifest
-src/js/content-script.js  Main-world player, audio tracking, fetch capture, and UI
-src/js/media-timeline.js  Stable duration, seek-range, and metadata-probe helpers
-src/js/captured-playback.js Detached captured-player readiness and cleanup lifecycle
-src/js/player-settings.js Shared settings schema, defaults, and validation
-src/js/settings-bridge.js Isolated-world storage bridge
-src/js/popup.js           Popup settings controller
-src/popup.html            Extension popup markup
-src/css/popup.css         Popup styling
-preview.html              Local UI preview harness
-docs/                     Maintainer notes
-```
-
-See [`docs/CODEBASE.md`](docs/CODEBASE.md) for the file-level guide and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for runtime-boundary notes.
-
-## Debugging
-
-Runtime logs are disabled by default. To enable scoped player logs in the current ChatGPT tab:
-
-```js
-localStorage.setItem('ae_debug', '1')
-```
-
-To disable them:
-
-```js
-localStorage.removeItem('ae_debug')
-```
-
-Debug output uses the `[AE Player]` prefix.
-
-## Contributing
-
-Contributions should preserve the extension's runtime boundaries:
-
-- Popup code may use extension APIs.
-- `settings-bridge.js` may use extension APIs and forwards raw settings through scoped DOM `CustomEvent`s.
-- `content-script.js` runs in the page's main world and must remain able to observe page-created audio elements and wrap `window.fetch`.
-- Do not use `window.postMessage` for internal extension settings traffic.
-- Avoid broad refactors of audio detection, fetch interception, or element tracking unless tied to a specific defect.
-
-Before opening a pull request:
-
-Use Node.js 18 or newer for the runtime tests (the harness relies on the built-in `Blob` implementation).
-
-1. Run `node --test tests/*.test.js`.
-2. Run JavaScript syntax checks for every file in `src/js/`.
-3. Parse `manifest.json`.
-4. Open `preview.html` in light and dark modes.
-5. Test `ae-download=loading`, `ae-download=ready`, and `ae-download=failed` in preview mode.
-6. Load the extension unpacked in Chrome.
-7. Reload a fresh `chatgpt.com` tab.
-8. Start Read Aloud and confirm the player appears.
-9. Confirm a streamed response gains a stable timeline after capture completes, with seeks clamped to loaded ranges.
-10. Let the timeline advance to a nonzero position, Pause without scrubbing, wait for UI sync, and confirm the bar and both skip buttons remain enabled at that position.
-11. Resume and confirm playback advances from the preserved position rather than restarting or becoming inert.
-12. Scrub to another loaded position and repeat Pause/Resume and both skip actions.
-13. Confirm speed changes update both time labels without changing the seekbar position.
-14. Start another Read Aloud response and confirm the previous captured player stops without pausing unrelated page audio.
-15. Confirm the speed menu hover and selected states are stable.
-16. Confirm the download button stays disabled until capture completes and returns to its non-hover resting state after downloading.
-17. Confirm DevTools is not flooded with extension-origin messages or interrupted-play errors.
-
-## Attribution
-
-Originally forked from Ian Speckart's `chatgpt-audio-player`. This version has diverged into a settings-driven floating controls extension. See [`CREDITS.md`](CREDITS.md) for original project and third-party attributions.
-
-## License
-
-MIT. See [`LICENSE`](LICENSE).
+MIT. See [LICENSE](LICENSE).
