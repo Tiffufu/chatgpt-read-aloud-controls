@@ -1,7 +1,7 @@
 # Documentation visuals
 
 Captured October 30, 2026 from the production extension UI at runtime commit
-`4d782b3`. The player and popup images are browser JPEG captures. The splash is a
+`2a2c39a`. The player and popup images are browser JPEG captures. The splash is a
 composition of those captures with typography and a background; its controls and
 response text are the captured product UI.
 
