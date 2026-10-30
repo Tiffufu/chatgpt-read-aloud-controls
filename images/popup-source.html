@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Settings documentation capture</title>
+<style>html,body{margin:0}iframe{display:block;width:300px;height:395px;border:0}</style>
+<iframe title="Actual extension settings" src="../src/popup.html"></iframe>
+<script>
+    // An iframe inherits the embedding element's color scheme, so production
+    // popup media queries render the requested appearance without a CSS override.
+    const theme = new URLSearchParams(location.search).get('theme');
+    document.querySelector('iframe').style.colorScheme = theme === 'light' ? 'light' : 'dark';
+</script>
+</html>

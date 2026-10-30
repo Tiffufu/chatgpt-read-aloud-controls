@@ -2,9 +2,12 @@
 
 Listen to ChatGPT with a floating player and a reading queue you can manage. Pause and resume, seek through a response, change speed, and line up what to hear next.
 
-![Current dark player with its attached reading queue: one response playing and three waiting](images/reading-queue-dark.jpg)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/splash-dark.jpg">
+  <img src="images/splash-light.jpg" alt="Read Aloud Controls for ChatGPT: overlapping light and dark players with a reading queue">
+</picture>
 
-*Production extension UI captured locally with sample responses. [Capture notes](images/README.md).*
+*Actual extension UI with sample responses. Screenshots follow your GitHub theme; the splash presents both options together. [Capture notes](images/README.md).*
 
 This extension is independently maintained and is not affiliated with OpenAI.
 
@@ -32,11 +35,17 @@ When updating an existing unpacked installation, update its files, click **Reloa
 
 With the drawer closed, the player keeps the playback controls and timeline in view:
 
-![Expanded light player with speed, skip, playback, download, queue, and timeline controls](images/player-expanded-light.jpg)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/player-expanded-dark.jpg">
+  <img src="images/player-expanded-light.jpg" alt="Expanded player with speed, skip, playback, download, queue, and timeline controls">
+</picture>
 
 Minimizing hides the timeline and drawer while keeping the same skip intervals and Play/Pause control:
 
-![Minimized light player retaining skip back, Play, skip forward, expand, and close controls](images/player-minimized-light.jpg)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/player-minimized-dark.jpg">
+  <img src="images/player-minimized-light.jpg" alt="Minimized player retaining skip back, Play, skip forward, expand, and close controls">
+</picture>
 
 ## The reading queue
 
@@ -44,7 +53,10 @@ Open the queue beside Download to see the current response and what is waiting. 
 
 Clicking a response preview scrolls to and briefly highlights its source in the chat. It does not start playback or change the order. Pause holds your place; new responses can still join the end.
 
-![Light reading queue with a paused response and three upcoming responses](images/reading-queue-light.jpg)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/reading-queue-dark.jpg">
+  <img src="images/reading-queue-light.jpg" alt="Reading queue with a paused response and three upcoming responses">
+</picture>
 
 Queues stay in memory separately in each tab. They store response references and short excerpts, without prefetching queued audio. Closing the player clears the queue; changing conversations or reloading discards pending entries. Turning automatic reading off removes automatic entries while preserving your explicit selections and current audio.
 
@@ -54,7 +66,10 @@ See the [usage guide](docs/USAGE.md) for queue controls, settings, downloads, an
 
 Open the extension icon to set skip intervals, default speed, theme, and **Automatically read new responses aloud**. Automatic reading starts off; both skip intervals default to 15 seconds. Settings are saved locally and apply to active ChatGPT tabs.
 
-<img src="images/settings.jpg" alt="Current settings popup with independent skip intervals, default playback speed, theme, and automatic reading checkbox" width="300">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/settings-dark.jpg">
+  <img src="images/settings-light.jpg" alt="Settings popup with independent skip intervals, default playback speed, theme, and automatic reading checkbox" width="300">
+</picture>
 
 ## Playback notes
 

@@ -1,50 +1,74 @@
-# Documentation screenshots
+# Documentation visuals
 
 Captured October 30, 2026 from the production extension UI at runtime commit
-`4d782b3`. These are browser JPEG captures, cropped around the player or popup.
-They are not renders of the separate design prototype and have not had controls,
-text, or playback state painted onto them.
+`4d782b3`. The player and popup images are browser JPEG captures. The splash is a
+composition of those captures with typography and a background; its controls and
+response text are the captured product UI.
 
-The player captures use `tests/fixtures/reading-queue-preview.html`, which loads
-the actual player, drawer, scheduler, adapter, media helpers, and styles. Only
-extension storage and the speech/media service are replaced by local boundaries
-with sample responses and silent WAV audio. The popup capture uses the actual
-`src/popup.html`, scripts, and styles; without Chrome storage it displays defaults.
-These images demonstrate UI appearance, not a live ChatGPT compatibility test.
+## Theme-aware presentation
 
-| Image | State | Dimensions |
+The README and usage guide use GitHub-supported `<picture>` elements. A dark
+`<source media="(prefers-color-scheme: dark)">` selects the dark image; the `<img>`
+provides the light image, accessible alternative text, and a fallback for other
+Markdown renderers. Supporting screenshots follow the reader's theme throughout
+the page. The splash intentionally compares both modes together on a matching
+light or dark background.
+
+Open `review.html` on the local server to inspect the actual README picture
+elements together. Its Light and Dark controls change the embedding color scheme
+for review; production Markdown uses the reader's GitHub appearance.
+
+[GitHub's theme-aware image guide](https://github.blog/developer-skills/github/how-to-make-your-images-in-markdown-on-github-adjust-for-dark-mode-and-light-mode/)
+
+| Image pair (`-light.jpg` / `-dark.jpg`) | State | Dimensions |
 | --- | --- | --- |
-| `reading-queue-dark.jpg` | Playing, drawer open, one current response and three waiting. | 592 × 513 |
-| `reading-queue-light.jpg` | Paused, drawer open, same queue. | 592 × 513 |
-| `player-expanded-light.jpg` | Paused, drawer closed. | 592 × 197 |
-| `player-minimized-light.jpg` | Paused, minimized, same skip values. | 592 × 88 |
-| `settings.jpg` | Actual settings form with fresh-install defaults. | 300 × 395 |
+| `splash` | Light and dark players, slightly overlapped in one composition. | 1280 × 920 |
+| `reading-queue` | Paused, drawer open, one current response and three waiting. | 592 × 513 |
+| `player-expanded` | Paused, drawer closed. | 592 × 197 |
+| `player-minimized` | Paused, minimized, same skip values. | 592 × 88 |
+| `settings` | Actual settings form with fresh-install defaults. | 300 × 395 |
+
+## Capture sources
+
+Player captures use `tests/fixtures/reading-queue-preview.html?ae-docs=1`, which
+loads the actual player, drawer, scheduler, adapter, media helpers, and styles.
+The documentation parameter selects a neutral sample title and excerpts. Only
+extension storage and speech/media use local boundaries with silent WAV audio.
+These captures demonstrate appearance, not live ChatGPT compatibility.
+
+`popup-source.html?theme=light` or `?theme=dark` embeds the actual `src/popup.html`.
+The iframe's `color-scheme` lets the production popup's own media queries select
+the appearance. Without extension storage, its actual script displays defaults.
+
+`splash-source.html?theme=light` or `?theme=dark` arranges the two queue captures,
+cropping only their outer margins. It adds the title, theme labels, background,
+and shadows. No player controls are recreated or retouched.
 
 ## Refresh captures
 
 1. Serve the repository locally as described in [DEVELOPMENT.md](../docs/DEVELOPMENT.md).
-2. Open `tests/fixtures/reading-queue-preview.html` at a desktop viewport wide
-   enough for the 560px player. The original captures used 1280 × 720 CSS pixels.
-3. Select **Start sample queue**, then skip forward once to show timeline progress.
-4. Scroll back to the top so the harness controls stay outside the crop. Open the
-   reading drawer and move the pointer onto blank page space to remove hover tint.
-5. Capture the dark playing state. Pause to hold a stable position for subsequent
-   captures. Close the drawer before using the harness's theme button, then scroll
-   back to the top and reopen it for the light capture.
-6. Close the drawer for the expanded-player image. Minimize for the compact image.
-   Include the whole border and a little space for the shadow; retain a consistent
-   displayed width across player screenshots.
-7. Open `src/popup.html` and capture its 300px-wide form, including the status text.
-   The popup follows the browser's system color scheme; this capture is dark.
-8. Inspect every saved image at its displayed size, check file extensions match
-   the actual image format, and update captions if the UI or queue count changed.
+2. Open the interactive fixture with `?ae-docs=1` at a desktop viewport wide
+   enough for the 560px player. These captures used 1280 × 720 CSS pixels.
+3. Select **Start sample queue**, advance with the skip controls, then Pause to
+   hold the same position across every screenshot. Do not edit the rendered text
+   or draw controls onto an exported image.
+4. Scroll to the top so harness controls remain outside the crop. Open the
+   drawer and move the pointer onto blank space before capturing. Close the
+   drawer before clicking the harness theme button, then reopen it in the other
+   theme. Confirm both variants show the same title, position, count, and excerpts.
+5. Capture the expanded player with the drawer closed and then the minimized
+   player in each theme. Preserve matching bounds, including border and shadow.
+6. Capture the 300px-wide form through each `popup-source.html` theme variant.
+7. Open both `splash-source.html` variants and export the full 1280 × 920 page.
+   Check overlap, shadow clipping, text contrast, and actual UI content.
+8. Inspect both documentation themes. Every supporting `<picture>` must select
+   its matching source; the splash's background must match too. Check image
+   extensions and dimensions and keep alternative text neutral about theme.
 
-Use synthetic sample responses, or explicitly approved public content. Do not
-publish screenshots of private chats, account details, or browser profile UI.
-Keep screenshot provenance accurate: a local production-UI capture is not a
-screenshot of the installed extension on live ChatGPT.
+Use sample responses or explicitly approved public content. Do not publish
+private chats, account details, or browser profile UI. A local production-UI
+capture is not a screenshot of the installed extension on live ChatGPT.
 
 The legacy `small-promo-tile-440x280.png` and
-`marquee-promo-tile-1400x560.png` remain historical promotional assets. They are
-not used by the current documentation and have not been refreshed as store art.
-Original project credit remains in [CREDITS.md](../CREDITS.md).
+`marquee-promo-tile-1400x560.png` remain historical promotional assets, outside
+current documentation. Original credit remains in [CREDITS.md](../CREDITS.md).

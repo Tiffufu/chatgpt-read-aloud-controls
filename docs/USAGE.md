@@ -4,7 +4,10 @@
 
 Start **Read Aloud** on a completed ChatGPT response. The floating player appears when playback starts. Drag its header to reposition it.
 
-![Expanded player with the reading drawer closed](../images/player-expanded-light.jpg)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/player-expanded-dark.jpg">
+  <img src="../images/player-expanded-light.jpg" alt="Expanded player with the reading drawer closed">
+</picture>
 
 | Control | What it does |
 | --- | --- |
@@ -23,7 +26,10 @@ The player briefly disables Pause while preparing a resumable copy of the respon
 
 While one response is playing or paused, select **Read Aloud** on another completed response. It joins the end instead of interrupting playback. This also works when automatic reading is off.
 
-![Actual dark drawer showing one playing response and three upcoming responses](../images/reading-queue-dark.jpg)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/reading-queue-dark.jpg">
+  <img src="../images/reading-queue-light.jpg" alt="Reading drawer showing one paused response and three upcoming responses">
+</picture>
 
 The queue button counts **current + waiting**. In this screenshot its `4` means one current response and three waiting; **Up next · 3** refers only to those waiting. A current response still counts while paused. A finished response does not count.
 
@@ -42,7 +48,10 @@ Selecting an already queued response does not add a duplicate. Excerpts use a me
 
 Pausing holds your position and prevents the next response from starting. New responses can still join the queue. Playback advances when the current audio ends, keeping the player mounted while the next response starts.
 
-![Minimized player with the same playback and skip controls](../images/player-minimized-light.jpg)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/player-minimized-dark.jpg">
+  <img src="../images/player-minimized-light.jpg" alt="Minimized player with the same playback and skip controls">
+</picture>
 
 Minimizing hides the timeline, extra controls, and drawer. Expanding remembers whether the drawer was open. It does not change the skip intervals or playback position.
 
@@ -56,7 +65,10 @@ The current response’s captured audio uses memory for playback and download. C
 
 Open the extension popup and check **Automatically read new responses aloud**.
 
-<img src="../images/settings.jpg" alt="Extension popup showing skip, speed, theme, and automatic reading settings" width="300">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/settings-dark.jpg">
+  <img src="../images/settings-light.jpg" alt="Extension popup showing skip, speed, theme, and automatic reading settings" width="300">
+</picture>
 
 Newly completed responses join the tab’s queue. Opening, scrolling, or focusing an existing conversation does not read its history. Both manually selected and automatically added responses wait behind paused playback.
 
@@ -92,4 +104,4 @@ The source may have been removed, edited, or unloaded by ChatGPT. The drawer rep
 
 ## About the screenshots
 
-These are browser captures of the production extension modules with local sample responses and silent audio. The popup image uses its actual HTML, CSS, and JavaScript with default settings. They show the current implementation, without publishing private ChatGPT conversations. See [capture instructions](../images/README.md).
+Images follow your GitHub theme. These are matching browser captures of the production extension modules with local sample responses and silent audio. The popup image uses its actual HTML, CSS, and JavaScript with default settings. They show the current implementation, without publishing private ChatGPT conversations. See [capture instructions](../images/README.md).

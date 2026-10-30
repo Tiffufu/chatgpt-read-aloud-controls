@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Read Aloud Controls — documentation splash</title>
+<style>
+    * { box-sizing: border-box; }
+    :root { --paper: #e9ece6; --ink: #28302a; --muted: #5d685f; --label: #667064; }
+    html[data-theme=dark] { --paper: #1b241f; --ink: #e9eee8; --muted: #a4b3a7; --label: #9daf9f; }
+    body { margin: 0; background: var(--paper); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: var(--ink); }
+    #splash { position: relative; width: 1280px; height: 920px; overflow: hidden; background: var(--paper); }
+    header { position: absolute; left: 84px; top: 48px; }
+    .brand { margin: 0 0 17px; font-size: 17px; font-weight: 600; letter-spacing: .2px; color: var(--muted); }
+    h1 { margin: 0; font-size: 68px; line-height: 1.04; letter-spacing: -3px; font-weight: 650; }
+    .subtitle { margin: 19px 0 0; font-size: 22px; color: var(--muted); letter-spacing: -.3px; }
+    figure { position: absolute; margin: 0; width: 560px; }
+    figcaption { position: absolute; top: -31px; font-size: 12px; letter-spacing: 2px; font-weight: 650; color: var(--label); }
+    .light { left: 84px; top: 278px; }
+    .dark { left: 606px; top: 384px; z-index: 2; }
+    .dark figcaption { right: 0; }
+    .window { position: relative; width: 560px; height: 481px; border-radius: 14px; overflow: hidden; background: #f7f7f4; box-shadow: 0 30px 55px -22px #26342840, 0 5px 15px #2634280a; }
+    .dark .window { background: #28292b; box-shadow: 0 35px 65px -22px #17231b55, 0 8px 20px #17231b12; }
+    figure img { position: absolute; left: -16px; top: -16px; width: 592px; height: 513px; }
+    footer { position: absolute; left: 84px; bottom: 66px; width: 410px; font-size: 17px; color: var(--muted); line-height: 1.5; }
+</style>
+<main id="splash" aria-label="Read Aloud Controls product splash showing light and dark players">
+    <header>
+        <p class="brand">Read Aloud Controls for ChatGPT</p>
+        <h1>Listen at your pace.</h1>
+        <p class="subtitle">A familiar player. A queue you control.</p>
+    </header>
+    <figure class="light"><figcaption>LIGHT</figcaption><div class="window"><img src="reading-queue-light.jpg" alt="Actual extension player and queue in light mode"></div></figure>
+    <figure class="dark"><figcaption>DARK</figcaption><div class="window"><img src="reading-queue-dark.jpg" alt="Actual extension player and queue in dark mode"></div></figure>
+    <footer>Light or dark.<br>The same controls, right where you need them.</footer>
+</main>
+<script>
+    // Only the composition background changes. Both product views are untouched
+    // browser captures of the actual extension, arranged by this source file.
+    const theme = new URLSearchParams(location.search).get('theme');
+    document.documentElement.dataset.theme = theme === 'dark' ? 'dark' : 'light';
+</script>
+</html>

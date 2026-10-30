@@ -26,7 +26,14 @@ window.fetch=(input,options)=>String(input).includes('/backend-api/synthesize')?
 <script src="../../src/js/player-settings.js"></script><script src="../../src/js/aac-container.js"></script><script src="../../src/js/media-timeline.js"></script><script src="../../src/js/captured-playback.js"></script><script src="../../src/js/reading-queue.js"></script><script src="../../src/js/content-script.js"></script>
 <script>
 let pageAudio=null;let pageObjectUrl=null;let number=0;let theme='dark';
-const examples=[
+const documentationPreview=new URLSearchParams(location.search).get('ae-docs')==='1';
+if(documentationPreview)document.title='A little time to read - ChatGPT';
+const examples=documentationPreview?[
+ 'Start with a little time for something you enjoy. A few quiet minutes can make room for a good book.',
+ 'Keep a short list of what you would like to read next. Choose whatever fits your mood today.',
+ 'Let the next chapter wait until you are ready. You can pick up exactly where you left off.',
+ 'Make the routine your own, one page at a time. There is no need to rush through the whole list.'
+]:[
  'A reading queue can stay small and easy to manage. Keep the player familiar, then reveal upcoming messages only when you need them.',
  'Yes. The queue can stay in this extension without making the player feel crowded. Keep the everyday controls easy to reach.',
  'Dude, the whole point is to keep listening while new responses come in and still be able to move things around without losing your place in the conversation.',
