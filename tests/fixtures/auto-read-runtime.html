@@ -59,6 +59,19 @@
  await check('A new fast response starts native Read Aloud once without a manual read click',async()=>{
   const t=await tab(sharedStorage(true),{history:turn('old','Old answer')});await t.send('new');assert(t.clicks.join(',')==='new','new response did not start');t.doc.dispatchEvent(new Event('visibilitychange'));await settle();assert(t.clicks.length===1,'focus repeated playback');
  });
+ await check('Current assistant markup starts automatically and publishes its excerpt',async()=>{
+  const t=await tab(sharedStorage(true));
+  t.doc.getElementById('prompt-textarea').textContent='Test submission';t.doc.querySelector('button[aria-label="Send"]').click();
+  t.doc.querySelector('[aria-label="Conversation"]').insertAdjacentHTML('beforeend',turn('current','The current response.').replace('data-dil-message-id="message-current"','data-markdown-text-style="assistant-message"'));
+  await settle();assert(t.clicks.join(',')==='current','current markup did not start');assert(t.queue().current.snippet==='The current response.','current excerpt missing');
+ });
+ await check('Current assistant markup queues manually behind paused playback',async()=>{
+  const history=turn('first','The first answer.')+turn('next','The next answer.').replace('data-dil-message-id="message-next"','data-markdown-text-style="assistant-message"');
+  const t=await tab(sharedStorage(false),{history});
+  t.doc.querySelector('[data-turn-key="first"] button[aria-label="Read aloud"]').click();await settle();t.publish('paused',{responseId:'first'});
+  t.doc.querySelector('[data-turn-key="next"] button[aria-label="Read aloud"]').click();await settle();
+  assert(t.clicks.join(',')==='first','queued selection interrupted playback');assert(t.queue().items[0]?.snippet==='The next answer.','current markup was not admitted');
+ });
  await check('Pause holds FIFO and completion starts the next native response',async()=>{
   const t=await tab(sharedStorage(true),{history:turn('old','Old answer')});await t.send('first');t.publish('paused');await t.send('second');assert(t.clicks.length===1,'pause was interrupted');t.publish('ended');await settle();assert(t.clicks.join(',')==='first,second','queue did not advance');
  });

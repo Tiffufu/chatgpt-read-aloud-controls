@@ -651,6 +651,8 @@ const createContentScriptHarness = ({
     capturedSeekable = [[0, capturedDuration]],
     captureBytes = new Uint8Array([1, 2, 3]),
     deferCaptureCompletion = false,
+    beforeFetch = async () => {},
+    responseFor = null,
     fetchFailure = null,
     now = () => Date.now()
 } = {}) => {
@@ -667,6 +669,7 @@ const createContentScriptHarness = ({
     const capturedPlaybackControllers = [];
     const capturedPlaybackTimeouts = [];
     const revokedPlaybackUrls = [];
+    const fetchUrls = [];
     let nextIntervalId = 1;
     let nextCapturedUrlId = 1;
     let resolveDeferredCapture = null;
@@ -711,9 +714,11 @@ const createContentScriptHarness = ({
         clearTimeout,
         console,
         document,
-        fetch: async () => {
+        fetch: async (url) => {
+            fetchUrls.push(String(url));
+            await beforeFetch(String(url));
             if (fetchFailure) throw fetchFailure;
-            return createResponse();
+            return responseFor ? responseFor(String(url), createResponse()) : createResponse();
         },
         innerHeight: 900,
         innerWidth: 1440,
@@ -843,6 +848,7 @@ const createContentScriptHarness = ({
         expireCapturedPlayback,
         findButton,
         findPlayerElement,
+        fetchUrls,
         flushMicrotasks,
         makeCapturedReady,
         revokedPlaybackUrls,
@@ -1809,4 +1815,204 @@ test('split timeline keeps rate-adjusted labels and a stable disabled loading tr
     }));
     assert.ok(h.findPlayerElement(e => e.textContent === '0:40'));
     assert.ok(h.findPlayerElement(e => e.textContent === '3:30'));
+});
+
+const selectReadAloud = (h, responseId = 'answer', requestId = null) => {
+    h.context.document.dispatchEvent(new h.context.CustomEvent('ae-read-aloud-player:playback-intent', {
+        detail: { responseId, requestId }
+    }));
+};
+
+test('an explicit cached Read Aloud selection mounts controls without a speech request', async () => {
+    const h = createContentScriptHarness();
+    const states = listenToPlayback(h);
+    selectReadAloud(h);
+    const audio = h.createAudio('blob:cached-answer', { duration: 90, seekable: [[0, 90]] });
+    await audio.play();
+    await h.flushMicrotasks();
+    await h.runIntervals();
+    assert.ok(h.context.document.getElementById('ae_enhanced_player'));
+    assert.ok(states.some(value => value.state === 'playing' && value.responseId === 'answer'));
+    assert.ok(h.findButton('Pause'));
+    h.findButton('Pause').click();
+    await h.flushMicrotasks();
+    assert.equal(audio.paused, true);
+    assert.ok(h.findButton('Play'));
+});
+
+test('audio playing before its speech response keeps its owner when capture arrives', async () => {
+    const h = createContentScriptHarness();
+    const states = listenToPlayback(h);
+    selectReadAloud(h);
+    const audio = h.createAudio('blob:early-answer', { currentTime: 12, duration: 90, seekable: [[0, 90]] });
+    await audio.play();
+    await h.flushMicrotasks();
+    assert.ok(h.context.document.getElementById('ae_enhanced_player'));
+    const sessionId = states.at(-1).sessionId;
+    await h.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    await h.runIntervals();
+    assert.equal(states.at(-1).sessionId, sessionId);
+    assert.equal(states.at(-1).state, 'playing');
+    assert.equal(audio.currentTime, 12);
+    assert.ok(h.findButton('Pause'));
+});
+
+test('unselected blob audio never opens the player', async () => {
+    const h = createContentScriptHarness();
+    await h.createAudio('blob:unrelated').play();
+    await h.runIntervals();
+    assert.equal(h.context.document.getElementById('ae_enhanced_player'), null);
+});
+
+test('expired read intent cannot claim later blob audio', async () => {
+    let now = 1000;
+    const h = createContentScriptHarness({ now: () => now });
+    selectReadAloud(h);
+    now += 16000;
+    await h.createAudio('blob:unrelated-later').play();
+    await h.runIntervals();
+    assert.equal(h.context.document.getElementById('ae_enhanced_player'), null);
+});
+
+test('cancelled read intent prevents cached audio from starting', async () => {
+    const h = createContentScriptHarness();
+    selectReadAloud(h, 'answer', 'auto-cached');
+    h.context.document.dispatchEvent(new h.context.CustomEvent('ae-read-aloud-player:playback-cancel', {
+        detail: { requestId: 'auto-cached' }
+    }));
+    const audio = h.createAudio('blob:cancelled-cached');
+    await assert.rejects(audio.play(), { name: 'AbortError' });
+    assert.equal(audio.playCalls, 0);
+    assert.equal(h.context.document.getElementById('ae_enhanced_player'), null);
+});
+
+test('an in-flight speech fetch attaches to early audio without restarting its session', async () => {
+    let finish;
+    const gate = new Promise(resolve => { finish = resolve; });
+    const h = createContentScriptHarness({ beforeFetch: url => url.includes('synthesize') ? gate : undefined });
+    const states = listenToPlayback(h);
+    selectReadAloud(h);
+    const request = h.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    const audio = h.createAudio('blob:early-answer', { currentTime: 12, seekable: [[0, 90]] });
+    await audio.play();
+    await h.flushMicrotasks();
+    assert.ok(h.context.document.getElementById('ae_enhanced_player'));
+    const sessionId = states.at(-1).sessionId;
+    assert.equal(states.at(-1).state, 'playing');
+    assert.deepEqual(h.fetchUrls, ['https://chatgpt.com/backend-api/synthesize']);
+    finish();
+    await request;
+    await h.flushMicrotasks();
+    await h.runIntervals();
+    assert.equal(states.at(-1).sessionId, sessionId);
+    assert.equal(audio.currentTime, 12);
+    assert.ok(h.findButton('Pause'));
+});
+
+test('cancelling a pending cached play stops it when its play promise resolves', async () => {
+    const h = createContentScriptHarness();
+    selectReadAloud(h, 'answer', 'auto-pending');
+    const audio = h.createAudio('blob:pending-cached');
+    let finish;
+    audio.playImplementation = () => new Promise(resolve => {
+        finish = () => { audio.paused = false; resolve(); };
+    });
+    const play = audio.play();
+    h.context.document.dispatchEvent(new h.context.CustomEvent('ae-read-aloud-player:playback-cancel', {
+        detail: { requestId: 'auto-pending' }
+    }));
+    finish();
+    await play;
+    await h.flushMicrotasks();
+    assert.equal(audio.paused, true);
+    assert.equal(h.context.document.getElementById('ae_enhanced_player'), null);
+});
+
+test('cached blob capture failure leaves controls visible and playback untouched', async () => {
+    const h = createContentScriptHarness({ fetchFailure: new Error('Blob is a MediaSource') });
+    selectReadAloud(h);
+    const audio = h.createAudio('blob:unfetchable', { seekable: [[0, 90]] });
+    await audio.play();
+    await h.flushMicrotasks();
+    assert.ok(h.context.document.getElementById('ae_enhanced_player'));
+    assert.equal(audio.paused, false);
+    assert.equal(h.findButton('Pause unavailable')?.disabled, true);
+    assert.equal(h.findButton('Audio download unavailable')?.disabled, true);
+});
+
+test('closing while cached capture is pending cannot resurrect controls', async () => {
+    let finish;
+    const gate = new Promise(resolve => { finish = resolve; });
+    const h = createContentScriptHarness({ beforeFetch: () => gate });
+    selectReadAloud(h);
+    const audio = h.createAudio('blob:pending-capture');
+    await audio.play();
+    await h.flushMicrotasks();
+    h.findButton('Close player').click();
+    finish();
+    await h.flushMicrotasks();
+    await h.runIntervals();
+    assert.equal(h.context.document.getElementById('ae_enhanced_player'), null);
+    assert.equal(audio.paused, true);
+});
+
+test('a newer read selection cannot leave a cancelled earlier play audible', async () => {
+    const h = createContentScriptHarness();
+    selectReadAloud(h, 'first', 'auto-first');
+    const audio = h.createAudio('blob:first-cached');
+    let finish;
+    audio.playImplementation = () => new Promise(resolve => {
+        finish = () => { audio.paused = false; resolve(); };
+    });
+    const play = audio.play();
+    h.context.document.dispatchEvent(new h.context.CustomEvent('ae-read-aloud-player:playback-cancel', {
+        detail: { requestId: 'auto-first' }
+    }));
+    selectReadAloud(h, 'second', 'auto-second');
+    finish();
+    await play;
+    await h.flushMicrotasks();
+    assert.equal(audio.paused, true);
+    assert.equal(h.context.document.getElementById('ae_enhanced_player'), null);
+});
+
+test('a cancelled old play promise cannot pause a newer play on the same element', async () => {
+    const h = createContentScriptHarness();
+    selectReadAloud(h, 'first', 'auto-first');
+    const audio = h.createAudio('blob:reused-native');
+    let finish;
+    audio.playImplementation = () => new Promise(resolve => { finish = resolve; });
+    const oldPlay = audio.play();
+    h.context.document.dispatchEvent(new h.context.CustomEvent('ae-read-aloud-player:playback-cancel', {
+        detail: { requestId: 'auto-first' }
+    }));
+    selectReadAloud(h, 'second', 'auto-second');
+    audio.playImplementation = null;
+    await audio.play();
+    await h.flushMicrotasks();
+    finish();
+    await oldPlay;
+    await h.flushMicrotasks();
+    assert.equal(audio.paused, false);
+    assert.ok(h.context.document.getElementById('ae_enhanced_player'));
+});
+
+test('retrying a failed partial cached capture replaces its bytes', async () => {
+    let reads = 0;
+    const h = createContentScriptHarness({ responseFor: (url, response) => url.startsWith('blob:') ? {
+        ...response,
+        body: { getReader: () => ({ read: async () => {
+            if (reads++ === 0) return { done: false, value: new Uint8Array([9, 9, 9]) };
+            throw new Error('Interrupted cached stream');
+        } }) }
+    } : response });
+    h.context.console = { ...console, error() {} };
+    selectReadAloud(h);
+    const audio = h.createAudio('blob:partial-cached');
+    await audio.play();
+    await h.flushMicrotasks();
+    await h.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    await h.flushMicrotasks();
+    assert.equal(h.capturedBlobs.length, 1);
+    assert.deepEqual(Array.from(new Uint8Array(await h.capturedBlobs[0].arrayBuffer())), [1, 2, 3]);
 });

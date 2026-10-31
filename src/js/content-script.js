@@ -209,6 +209,8 @@
         capturedPlaybackRelease: null,
         startedAt: 0,
         startedPlaySequence: 0,
+        intent: null,
+        captureStarted: false,
         responseId: null,
         requestId: null,
         completedAt: 0
@@ -222,6 +224,7 @@
     const observedAudioElements = new Set();
     const extensionOwnedAudioElements = new WeakSet();
     const audioPlaySequences = new WeakMap();
+    const audioPlayAttempts = new WeakMap();
     let audioPlaySequence = 0;
     let readAloudIntent = null;
     let lastPlaybackState = '';
@@ -274,7 +277,10 @@
         if (typeof event.detail?.responseId !== 'string') return;
         readAloudIntent = {
             responseId: event.detail.responseId,
-            requestId: typeof event.detail.requestId === 'string' ? event.detail.requestId : null
+            requestId: typeof event.detail.requestId === 'string' ? event.detail.requestId : null,
+            startedAt: Date.now(),
+            playSequence: audioPlaySequence,
+            requestStarted: false
         };
     });
     document.addEventListener('ae-read-aloud-player:playback-cancel', event => {
@@ -667,6 +673,21 @@
         if (element.srcObject) return false;
 
         return Boolean(source && hasRecentReadAloudResponse());
+    };
+
+    // A native replay may use a cached blob, or play before fetch resolves.
+    // Only a fresh explicit selection can establish ownership without capture.
+    const pendingIntentForAudio = (element, playSequence) => {
+        const intent = readAloudIntent;
+        if (!intent || playerSession.intent === intent
+            || Date.now() - intent.startedAt > READ_ALOUD_AUDIO_ASSOCIATION_WINDOW_MS
+            || playSequence <= intent.playSequence || extensionOwnedAudioElements.has(element)
+            || element.srcObject) return null;
+        const source = getAudioSource(element);
+        if (!source.startsWith('blob:') && !isReadAloudResponseUrl(source)) return null;
+        const owner = playerSession.audioElement;
+        if (!playerSession.isClosed && hasElementSource(owner) && owner !== element && !owner.ended) return null;
+        return intent;
     };
 
     const bindReadAloudSessionToAudio = (element, playSequence = audioPlaySequences.get(element) || 0) => {
@@ -1606,22 +1627,40 @@
         return null;
     };
 
-    const captureDownloadAudio = (response, intent) => {
-        markReadAloudResponseSeen();
-
+    const beginPlayerSession = (intent, startedPlaySequence = audioPlaySequence) => {
         const sessionId = playerSession.id + 1;
         releaseCapturedPlaybackForSession(playerSession);
         playerSession = {
             ...createPlayerSession(sessionId),
             captureState: CAPTURE_STATE.LOADING,
-            mimeType: response.headers.get('content-type')?.split(';')[0] || 'audio/aac',
             startedAt: Date.now(),
+            intent,
             responseId: intent?.responseId || null,
             requestId: intent?.requestId || null,
-            startedPlaySequence: audioPlaySequence
+            startedPlaySequence
         };
         audio = null;
         publishPlaybackState('starting');
+        return sessionId;
+    };
+
+    const captureDownloadAudio = (response, intent) => {
+        markReadAloudResponseSeen();
+        const sameIntent = intent && playerSession.intent === intent;
+        if (sameIntent && playerSession.isClosed) return Promise.resolve();
+        // A late speech response must not reset audio already bound via intent.
+        if (sameIntent && playerSession.captureStarted && playerSession.captureState !== CAPTURE_STATE.FAILED) return Promise.resolve();
+        const sessionId = sameIntent ? playerSession.id : beginPlayerSession(intent);
+        if (sameIntent && playerSession.captureState === CAPTURE_STATE.FAILED) {
+            releaseCapturedPlaybackForSession(playerSession);
+            playerSession.chunks = [];
+            playerSession.capturedDuration = 0;
+            playerSession.capturedDurationIsExact = false;
+            playerSession.completedAt = 0;
+        }
+        playerSession.captureStarted = true;
+        playerSession.captureState = CAPTURE_STATE.LOADING;
+        playerSession.mimeType = response.headers.get('content-type')?.split(';')[0] || 'audio/aac';
         debugLog('capture started', {
             sessionId: playerSession.id,
             playbackKey: playerSession.playbackKey,
@@ -1629,6 +1668,26 @@
         });
         updateControlState();
         return collectDownloadStream(response, sessionId);
+    };
+
+    const bindIntentAudio = (element, playSequence, intent) => {
+        const sessionId = beginPlayerSession(intent, intent.playSequence);
+        clearPlayerDismissal();
+        bindReadAloudSessionToAudio(element, playSequence);
+        if (intent.requestStarted) return;
+        // Read only this selected, already-playing blob; never synthesize or
+        // prefetch another response. MediaSource URLs may not be fetchable.
+        originalFetch.call(window, getAudioSource(element)).then(response => {
+            if (isCurrentSession(sessionId) && !playerSession.isClosed) {
+                return captureDownloadAudio(response, intent);
+            }
+        }).catch(error => {
+            if (!isCurrentSession(sessionId) || playerSession.isClosed || playerSession.captureStarted) return;
+            playerSession.captureState = CAPTURE_STATE.FAILED;
+            playerSession.capturedPlaybackState = CAPTURED_PLAYBACK_STATE.FAILED;
+            debugLog('selected audio capture unavailable', { sessionId, error: error?.message });
+            updateControlState();
+        });
     };
 
     const getFetchUrl = (input) => {
@@ -1729,6 +1788,10 @@
         if (typeof originalPlay === 'function') {
             mediaPrototype.play = function (...args) {
                 const shouldTrack = isAudioElement(this);
+                const pendingIntent = shouldTrack ? pendingIntentForAudio(this, audioPlaySequence + 1) : null;
+                if (pendingIntent?.requestId && cancelledSpeechRequests.has(pendingIntent.requestId)) {
+                    return Promise.reject(cancelledPlaybackError());
+                }
                 if (shouldTrack && playerSession.requestId
                     && cancelledSpeechRequests.has(playerSession.requestId)
                     && readAloudIntent?.requestId === playerSession.requestId
@@ -1744,13 +1807,22 @@
                     rememberAudioElement(this);
                     audioPlaySequence += 1;
                     playSequence = audioPlaySequence;
+                    audioPlayAttempts.set(this, playSequence);
                 }
 
                 const result = originalPlay.apply(this, args);
 
                 if (shouldTrack) {
                     Promise.resolve(result).then(() => {
+                        if (pendingIntent && cancelledSpeechRequests.has(pendingIntent.requestId)) {
+                            if (audioPlayAttempts.get(this) === playSequence) pauseAudioElement(this);
+                            return;
+                        }
                         audioPlaySequences.set(this, playSequence);
+                        if (pendingIntent && pendingIntentForAudio(this, playSequence) === pendingIntent
+                            && !cancelledSpeechRequests.has(pendingIntent.requestId)) {
+                            bindIntentAudio(this, playSequence, pendingIntent);
+                        }
                         if (isReadAloudAudioElement(this)) {
                             if (!controlsDiv && !isDismissedPlayback(this)) clearPlayerDismissal();
                             bindReadAloudSessionToAudio(this, playSequence);
@@ -1905,6 +1977,7 @@
         const url = getFetchUrl(args[0]);
         const intent = isReadAloudResponseUrl(url) ? readAloudIntent : null;
         if (intent?.requestId && cancelledSpeechRequests.has(intent.requestId)) throw cancelledPlaybackError();
+        if (intent) intent.requestStarted = true;
         const requestController = intent?.requestId && typeof AbortController !== 'undefined'
             ? new AbortController() : null;
         let removeAbortListener = () => {};

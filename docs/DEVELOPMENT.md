@@ -47,6 +47,7 @@ python3 -m http.server 8000 --bind 127.0.0.1
 | `tests/fixtures/quiet-player.html` | Focus across minimization, shared transport, skip values, and drawer preference. |
 | `tests/fixtures/auto-read-runtime.html` | Native clicks, queue operations, generation detection, cancellation, failures, and invalidation. |
 | `tests/fixtures/auto-read-aloud.html` | DOM adapter and controller integration. |
+| `tests/fixtures/media-startup.html` | Click **Run silent playback checks** to verify cached and early native audio mounts the production player and preserves Pause/Resume and download. |
 | `tests/fixtures/long-audio.html` | Production capture and playback using a local recording selected by the tester. |
 | `src/popup.html` | Actual settings UI; uses defaults when extension storage is unavailable. |
 
@@ -75,7 +76,7 @@ After runtime changes, reload the unpacked extension and refresh a ChatGPT tab:
 9. Check light/dark appearance, long titles, narrow viewports, keyboard controls, and download states.
 10. Check failure recovery and unexpected console errors. Use actual speech input separately when validating dictated submissions.
 
-Local fixtures cannot establish compatibility with ChatGPT’s current production DOM, network behavior, autoplay policy, or microphone path. The [validation summary](VALIDATION.md) records dated results and practical limits.
+The [validation summary](VALIDATION.md) records automated, browser-fixture, and live verification results.
 
 ## Maintainability
 
