@@ -14,6 +14,21 @@ function workTurn(id, answer, state='complete'){
  return `<div data-turn-key="${id}"><div data-talvt-turn-state="${state}"><div><h4 data-conversation-role="user">You said:</h4><p>User input</p><button aria-label="Edit message"></button></div>${answer===null?'':`<div><h4 data-conversation-role="assistant">ChatGPT said:</h4><div data-dil-message-id="message-${id}">${answer}</div><button aria-label="Read aloud" aria-pressed="false"></button></div>`}</div></div>`;
 }
 const adapter=createChatGPTAdapter(fixture,{href:'https://chatgpt.com/c/test'});
+function currentTurn(answer){return `<div data-turn-key="current"><p>User input must stay out</p><div data-talvt-turn-state="complete"><h4 data-conversation-role="assistant">ChatGPT said:</h4><div data-markdown-text-style="assistant-message">${answer}</div><button aria-label="Read aloud"></button></div></div>`;}
+check('Current assistant markup extracts the answer without user text or role labels',()=>{
+ fixture.innerHTML=currentTurn('<p>A useful answer.</p><p>More detail.</p>');
+ const response=adapter.snapshot().turns[0];
+ assert(response.hasText,'current answer treated as empty');assert(response.snippet==='A useful answer.More detail.','wrong answer excerpt');
+ const signature=response.signature;fixture.querySelector('[data-markdown-text-style]').textContent='A revised answer.';
+ assert(adapter.snapshot().turns[0].signature!==signature,'answer changes did not invalidate signature');
+});
+check('Empty current assistant markup stays ineligible despite surrounding text',()=>{
+ fixture.innerHTML=currentTurn('');assert(!adapter.snapshot().turns[0].hasText,'empty answer became eligible');
+});
+check('Current assistant content takes precedence over unrelated legacy markdown',()=>{
+ fixture.innerHTML=currentTurn('<p>The final answer.</p>').replace('<p>User input must stay out</p>','<div class="markdown">Tool status must stay out</div>');
+ assert(adapter.snapshot().turns[0].snippet==='The final answer.','tool status replaced final answer');
+});
 check('Work layout extracts assistant text and stable response identity',()=>{
  fixture.innerHTML=workTurn('one','<p>Assistant answer.</p>');
  const s=adapter.snapshot();assert(s.turns.length===1,'expected one assistant response');assert(s.turns[0].id==='one','wrong identity');assert(s.turns[0].state==='complete','not complete');assert(s.userKey==='one','user key missing');

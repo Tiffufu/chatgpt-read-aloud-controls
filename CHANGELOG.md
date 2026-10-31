@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.1 — October 31, 2026
+
+### Fixed
+
+- Recognize current assistant-message markup for response excerpts, automatic
+  reading, and manual queue admission while retaining older layouts.
+- Mount the player for explicitly selected cached audio and audio that starts
+  before its speech response arrives. Late capture preserves the playing session.
+- Cancel delayed cached playback safely and ignore stale or unrelated audio.
+
+### Maintenance
+
+- Add response-markup fixtures and cached/early media startup regressions,
+  including real browser Pause/Resume checks with silent WAV audio.
+
 ## 0.3.0 — October 30, 2026
 
 ### Added

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Read Aloud media startup tests</title>
+<style>body{font:16px system-ui;max-width:900px;margin:40px auto}.pass{color:#067647}.fail{color:#b42318}iframe{width:700px;height:420px;border:1px solid #ccc}</style>
+<h1>Read Aloud media startup tests</h1><p>Production media modules with silent WAV audio and controlled speech responses.</p>
+<button id="run">Run silent playback checks</button><p id="summary">Ready</p><ol id="results"></ol>
+<script>
+function silentWave(){
+ const samples=8000*30,bytes=new Uint8Array(44+samples*2),v=new DataView(bytes.buffer);
+ const label=(at,text)=>{for(let i=0;i<text.length;i++)bytes[at+i]=text.charCodeAt(i);};
+ label(0,'RIFF');v.setUint32(4,bytes.length-8,true);label(8,'WAVE');label(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,8000,true);v.setUint32(28,16000,true);v.setUint16(32,2,true);v.setUint16(34,16,true);label(36,'data');v.setUint32(40,samples*2,true);return bytes;
+}
+const assert=(value,message)=>{if(!value)throw new Error(message);};
+async function until(fn){const end=Date.now()+5000;while(!fn()){if(Date.now()>end)throw new Error('Timed out waiting for media state');await new Promise(r=>setTimeout(r,20));}}
+async function setup(){
+ const frame=document.createElement('iframe');document.body.append(frame);const w=frame.contentWindow,d=frame.contentDocument;
+ d.title='Media startup fixture';let finish;const response=()=>new w.Response(silentWave(),{headers:{'content-type':'audio/wav'}});
+ const nativeFetch=w.fetch.bind(w);w.fetch=input=>String(input).includes('/backend-api/synthesize')?new Promise(resolve=>{finish=()=>resolve(response());}):nativeFetch(input);
+ for(const file of ['player-settings','aac-container','media-timeline','captured-playback','reading-queue','content-script']){
+  await new Promise((resolve,reject)=>{const s=d.createElement('script');s.src=new URL('../../src/js/'+file+'.js',location.href);s.onload=resolve;s.onerror=reject;d.head.append(s);});
+ }
+ const link=d.createElement('link');link.rel='stylesheet';link.href=new URL('../../src/css/player.css',location.href);d.head.append(link);
+ const states=[];d.addEventListener('ae-read-aloud-player:playback',e=>states.push(e.detail));
+ return {w,d,states,frame,finish:()=>finish(),audio(){const a=d.createElement('audio');a.muted=true;a.src=w.URL.createObjectURL(new w.Blob([silentWave()],{type:'audio/wav'}));return a;},select(){d.dispatchEvent(new w.CustomEvent('ae-read-aloud-player:playback-intent',{detail:{responseId:'sample',requestId:null}}));},cleanup(a){d.querySelector('[aria-label="Close player"]')?.click();a.pause();w.URL.revokeObjectURL(a.src);frame.remove();}};
+}
+document.getElementById('run').onclick=async()=>{
+ document.getElementById('run').disabled=true;const results=[];document.getElementById('results').replaceChildren();document.getElementById('summary').textContent='Running…';
+ for(const mode of ['cached','early']){
+  let t,a;
+  try{
+   t=await setup();t.select();const request=mode==='early'?t.w.fetch('/backend-api/synthesize'):null;
+   a=t.audio();await a.play();await until(()=>t.d.querySelector('#ae_enhanced_player'));const session=t.states.at(-1).sessionId;
+   if(request){t.finish();await request;}
+   await until(()=>t.d.querySelector('[aria-label="Pause"]:not(:disabled)'));
+   assert(t.states.at(-1).sessionId===session,'capture reset the playing session');
+   a.currentTime=3;t.d.querySelector('[aria-label="Pause"]').click();await until(()=>!!t.d.querySelector('[aria-label="Play"]'));
+   t.d.querySelector('[aria-label="Play"]').click();await until(()=>t.states.at(-1).state==='playing');
+   assert(t.d.querySelector('[aria-label="Download audio"]:not(:disabled)'),'download unavailable');
+   results.push({name:mode+' playback mounts player and preserves Pause/Resume',pass:true});
+  }catch(error){results.push({name:mode+' playback',pass:false,error:error.message});}
+  finally{if(t&&a)t.cleanup(a);}
+ }
+ for(const r of results){const li=document.createElement('li');li.className=r.pass?'pass':'fail';li.textContent=(r.pass?'PASS: ':'FAIL: ')+r.name+(r.error?' — '+r.error:'');document.getElementById('results').append(li);}
+ document.getElementById('summary').textContent=results.filter(r=>r.pass).length+'/'+results.length+' passed';document.documentElement.dataset.testResult=results.every(r=>r.pass)?'passed':'failed';document.getElementById('run').disabled=false;
+};
+</script></html>

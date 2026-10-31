@@ -47,7 +47,17 @@ On the first enabled Pause, `content-script.js` verifies that the captured eleme
 
 Close and response replacement release the captured element and revoke its URL. A new response pauses a previous extension-owned captured player but never passively pauses page-owned competitors. Late readiness from a released controller cannot modify the current session or rebuild a closed player.
 
-Closing marks the current session closed before teardown. Pending response reads, duration probes, and captured-player readiness callbacks check that state before allocating media or changing the UI. A captured owner also remains authoritative after its `ended` flag is set; passive page discovery cannot replace it. Ownership changes only through explicit close or a new speech-response session.
+Closing marks the current session closed before teardown. Pending response reads, duration probes, and captured-player readiness callbacks check that state before allocating media or changing the UI. A captured owner also remains authoritative after its `ended` flag is set; passive page discovery cannot replace it. Ownership changes through explicit close, a new speech-response session, or a fresh native Read Aloud selection.
+
+A fresh Read Aloud intent can associate the next eligible native audio play within
+15 seconds, allowing the player to mount before a speech fetch resolves. A late
+capture attaches to that session without replacing its active audio or position.
+When there is no speech request, the player reads the already-playing selected
+blob for capture; it does not synthesize or prefetch queued responses. If the blob
+cannot be read, the player stays visible with capture-dependent controls unavailable.
+Extension-owned audio, media streams, stale selections, and competing valid owners
+are excluded. Cancellation checks the pending play attempt even if a newer response
+has since been selected. Retrying a failed capture discards its partial bytes.
 
 
 ## Settings contract
@@ -84,6 +94,13 @@ unchanged. A different selection while busy is suppressed only after it is
 successfully queued. Scheduled starts defer their native click to avoid the
 browser's reentrant click guard. Pending clicks are cancelled with pending starts. Automatic admission
 can be disabled without stopping the manually selected queue.
+
+The adapter prefers `[data-markdown-text-style="assistant-message"]` for answer
+text, with the older message-body selectors retained as fallbacks. User text,
+assistant role headings, and unrelated tool markdown do not supply excerpts when
+the assistant body is present. The extracted text also drives eligibility and
+revision signatures, so markup compatibility affects queue admission as well as
+the displayed preview.
 
 `reading-queue.js` owns only the attached drawer, its expansion preference, and
 semantic editing/source-navigation commands. `content-script.js` mounts it beside
@@ -143,8 +160,7 @@ Debug logs use the `[AE Player]` prefix and must stay low-volume. Do not add def
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for runnable commands and browser fixture
 paths. Current user-facing controls and screenshots are in [USAGE.md](USAGE.md).
-The [validation summary](VALIDATION.md) records earlier checks and their limits;
-it does not replace checking a changed build against live ChatGPT.
+The [validation summary](VALIDATION.md) records automated, browser-fixture, and live verification results.
 
 Before shipping changes:
 
@@ -165,4 +181,4 @@ Before shipping changes:
 - Confirm the console is not flooded with extension-origin messages or interrupted-play errors.
 - Confirm any main-world fallback defaults still match `src/js/player-settings.js`.
 
-Recorded validation results and remaining limits are summarized in [VALIDATION.md](VALIDATION.md).
+Recorded validation results are summarized in [VALIDATION.md](VALIDATION.md).

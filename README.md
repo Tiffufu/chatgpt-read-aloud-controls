@@ -94,7 +94,7 @@ The extension uses plain Manifest V3 HTML, CSS, and JavaScript. There is no buil
 - [Usage and troubleshooting](docs/USAGE.md)
 - [Privacy](PRIVACY.md)
 - [Changelog](CHANGELOG.md)
-- [Recorded validation and limits](docs/VALIDATION.md)
+- [Validation results](docs/VALIDATION.md)
 - [Development, previews, and verification](docs/DEVELOPMENT.md)
 - [Codebase guide](docs/CODEBASE.md)
 - [Architecture and compatibility boundaries](docs/ARCHITECTURE.md)

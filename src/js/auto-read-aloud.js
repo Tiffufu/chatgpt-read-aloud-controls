@@ -437,7 +437,8 @@
             const explicit = stateNode?.getAttribute('data-talvt-turn-state');
             const streaming = ['generating', 'streaming', 'in_progress', 'in-progress'].includes(explicit)
                 || node.matches('[data-is-streaming="true"]') || node.querySelector('[data-is-streaming="true"], .result-streaming');
-            const body = node.querySelector('[data-dil-message-id], .markdown, [data-testid="message-text"]')
+            const body = node.querySelector('[data-markdown-text-style="assistant-message"]')
+                || node.querySelector('[data-dil-message-id], .markdown, [data-testid="message-text"]')
                 || (node.matches('[data-message-author-role="assistant"]') ? node : null);
             const text = (body?.textContent || '').replace(/\s+/g, ' ').trim();
             const read = node.querySelector(READ);

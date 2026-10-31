@@ -113,8 +113,7 @@ the manifest. Serve the repository locally and open
 For live testing, reload the unpacked extension and refresh a ChatGPT tab. Check
 that opening old conversations and switching tabs stays silent before testing
 new responses, queue progression, pause/resume, close, background playback, and
-independent tabs. Test dictated submission with a real speaker; automated typed
-submission does not establish microphone-path validation.
+independent tabs. Use actual speech input when checking dictated submission.
 
 ## Regression coverage
 
@@ -124,4 +123,4 @@ fast responses, and settings changes racing startup reads. A native generation
 control takes precedence over a turn container marked complete while streaming.
 
 Current verification instructions are in [DEVELOPMENT.md](DEVELOPMENT.md), with
-recorded results and practical limits in [VALIDATION.md](VALIDATION.md).
+recorded results in [VALIDATION.md](VALIDATION.md).

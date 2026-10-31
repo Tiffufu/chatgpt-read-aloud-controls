@@ -116,4 +116,4 @@ Icon buttons are rendered from semantic state instead of inferred DOM styles. `r
 
 ## Verification
 
-See [development and verification](DEVELOPMENT.md) for commands, browser fixtures, and live smoke checks. Refresh documentation images using [images/README.md](../images/README.md). Recorded results and limits are summarized in [VALIDATION.md](VALIDATION.md).
+See [development and verification](DEVELOPMENT.md) for commands, browser fixtures, and live smoke checks. Refresh documentation images using [images/README.md](../images/README.md). Recorded results are summarized in [VALIDATION.md](VALIDATION.md).
