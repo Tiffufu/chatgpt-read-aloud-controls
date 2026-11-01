@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased — dictation-pause experiment
+
+- Add an off-by-default **Pause audio while dictating** setting for ChatGPT web dictation. Resume applies only to audio paused by the feature; manual transport and lifecycle changes cancel it.
+- Hold queued starts during recording and display paused and failed-resume feedback. Pause is attempted only when recording starts with resumable audio ready; otherwise playback stays untouched for that recording. Confirmed automatic recording ends follow the same resume behavior as manual ends.
+- Add session-race regression tests and real-browser dictation fixtures. Live installation, long timeout and daily-use validation remain required before release.
+
 ## 0.3.1 — October 31, 2026
 
 ### Fixed

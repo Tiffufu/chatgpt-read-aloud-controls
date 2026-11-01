@@ -1,5 +1,20 @@
 # Validation summary
 
+## Unreleased dictation-pause experiment
+
+Recorded November 1, 2026 after removing deferred pausing:
+
+- Full Node suite: **141/141 passed**.
+- Production JavaScript syntax, manifest asset validation, and whitespace checks passed.
+- `tests/fixtures/media-startup.html`: **4/4 passed** in Chrome, including immediate pause/resume and verification that audio unready at recording start remains untouched until a new recording starts.
+- The settings popup was inspected with the off-by-default checkbox and revised help text.
+
+The experimental extension has not been installed or tested with live ChatGPT playback. Long unattended timeouts, other interface languages, daily-use testing, and packaged ZIP installation remain unverified. Earlier live dictation inspection established observable button, hotkey, cancellation, and transcription states; it did not validate this installed implementation.
+
+The following release record is historical and does not establish compatibility for this experiment.
+
+## v0.3.1 release record
+
 Updated October 31, 2026 for v0.3.1.
 
 ## Automated checks

@@ -25,7 +25,7 @@ When changing the extension, prefer this hierarchy:
 
 The fourth layer is the highest risk. Refactor it only for a specific defect and verify against a live ChatGPT Read Aloud session.
 
-The page owns transitions between its audio elements before handoff. Passive tracking must not pause competing elements. The extension pauses only the session-owned element in response to an explicit Pause or Close action, and extension-owned captured elements are excluded from page-candidate discovery.
+The page owns transitions between its audio elements before handoff. Passive tracking must not pause competing elements. The extension pauses only the session-owned element in response to an explicit Pause or Close action, or the user's enabled dictation-pause preference. Extension-owned captured elements are excluded from page-candidate discovery.
 
 ## Streaming timeline
 
@@ -69,6 +69,18 @@ The main-world player also carries a small last-resort fallback schema. It exist
 Stored settings in `chrome.storage.local` still take precedence over defaults, so changing a default affects fresh installs and cleared storage; existing saved values remain user-controlled. The main-world player requests settings writes through the isolated bridge so it never needs direct extension API access.
 
 ## Player session
+
+### Optional dictation pause
+
+`createChatGPTAdapter` owns dictation selectors and reports `starting`, `recording`, `transcribing`, `idle`, or `unknown`. An enabled Stop dictation control plus Cancel dictation establishes recording; Cancel transcription takes precedence over the disabled Stop control. This avoids dependence on a particular keyboard shortcut, waveform styling, or microphone interception.
+
+The adapter emits `ae-read-aloud-player:dictation` with `{state, conversation}` and answers `ae-read-aloud-player:dictation-request`. Payloads contain no transcript or microphone data. The existing mutation observer watches the relevant labels and enabled attributes. Settings use the canonical boolean `pauseWhileDictating`, default `false`, with the main-world fallback kept in sync.
+
+The player attempts pause once on the recording transition, only for an already resumable current owner, using the existing captured-playback handoff. Unready audio and pending Read Aloud requests are left alone for the entire recording. There is no deferred pause token, readiness retry, or waiting status. Repeated settings snapshots and recovery from unknown markup cannot rearm an ongoing recording. A confirmed end or new startup rearms the next recording. Ending recording resumes only the exact owner successfully paused by this feature. Manual transport, unknown state, navigation, close, replacement, disable and extension invalidation revoke its same-session ownership token. Play-attempt sequence and revision checks reject late automatic resumes without pausing a newer manual play. Resume rejection stays local to the player and leaves manual Play available.
+
+The queue controller's `setDictating` holds new starts while starting/recording, and conservatively holds through unknown markup after recording. It preserves admission, ordering and response identity. A not-yet-started deferred native click is cancelled with its timeout and retried after the hold ends. The player receives end transitions before the hold is released. Existing paused playback continues to hold the queue normally.
+
+Confirmed recording ends include automatic stops with the same DOM transition; timeout causes are not inferred. Resumable playback requires a complete capture, and the English control labels are compatibility assumptions requiring live smoke checks.
 
 `content-script.js` keeps download/capture state in a single `playerSession` object rather than loose globals. The session records:
 

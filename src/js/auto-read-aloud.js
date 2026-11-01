@@ -14,6 +14,8 @@
     const QUEUE_EVENT = 'ae-read-aloud-player:queue';
     const QUEUE_REQUEST = 'ae-read-aloud-player:queue-request';
     const QUEUE_COMMAND = 'ae-read-aloud-player:queue-command';
+    const DICTATION_EVENT = 'ae-read-aloud-player:dictation';
+    const DICTATION_REQUEST = 'ae-read-aloud-player:dictation-request';
     const START_ERROR = 'Read Aloud could not start. Start it manually to continue the queue, or turn automatic reading off and on to reset it.';
     const RECOVER = ' Start Read Aloud manually to continue the queue.';
     const playbackError = reason => ({
@@ -68,6 +70,7 @@
         let error = '';
         let lastPublished = '';
         let disposed = false;
+        let dictating = false;
 
         const busy = () => ['starting', 'playing', 'paused'].includes(playback.state);
         const serialize = item => ({
@@ -121,7 +124,7 @@
                 && record.state === 'complete' && record.hasText;
         };
         const tryStart = () => {
-            if (!attempt || attempt.clicked || disposed || suspended || busy()) return;
+            if (!attempt || attempt.clicked || disposed || suspended || dictating || busy()) return;
             if (!valid(attempt.item)) {
                 queue = queue.filter(item => item !== attempt.item);
                 clearAttempt();
@@ -143,7 +146,7 @@
             }
         };
         const pump = () => {
-            if (disposed || suspended || busy()) return;
+            if (disposed || suspended || dictating || busy()) return;
             if (attempt) { tryStart(); return; }
             while (queue.length && !valid(queue[0])) queue.shift();
             if (!queue.length) return;
@@ -327,6 +330,14 @@
                 });
                 edit();
             },
+            setDictating(value) {
+                dictating = value === true;
+                // A native click deferred to a microtask has not started a
+                // session yet. Keep its item, cancel its click and timeout.
+                if (dictating && attempt && !busy()) clearAttempt(true);
+                if (!dictating) pump();
+                emit();
+            },
             retry() { suspended = false; onError(''); pump(); emit(); },
             dispose() { disposed = true; enabled = false; clearQueue(); emit(); },
             beginGeneration(responseId = null) {
@@ -451,6 +462,15 @@
         };
         const conversation = () => new URL(location.href).pathname.replace(/\/$/, '') || '/';
         return {
+            dictationState() {
+                if (document.querySelector('button[aria-label="Cancel transcription"]')) return 'transcribing';
+                const stop = document.querySelector('button[aria-label="Stop dictation"]');
+                if (stop && !stop.disabled && stop.getAttribute('aria-disabled') !== 'true'
+                    && document.querySelector('button[aria-label="Cancel dictation"]')) return 'recording';
+                if (document.querySelector('button[aria-label="Starting dictation; click to cancel"]')) return 'starting';
+                if (document.querySelector('button[aria-label="Dictate"]')) return 'idle';
+                return 'unknown';
+            },
             snapshot() {
                 const turns = entries().map(describe);
                 const users = document.querySelectorAll('[data-message-author-role="user"], [data-turn-key]:has(button[aria-label="Edit message"])');
@@ -518,6 +538,9 @@
         let automaticClick = false;
         let scheduledNativeStart = null;
         let enabled = false;
+        let pauseWhileDictating = false;
+        let dictationHeld = false;
+        let lastDictation = '';
         let initialized = false;
         let scanScheduled = false;
         let settingsRevision = 0;
@@ -547,6 +570,8 @@
                 // button. Let the intercepted user click finish first.
                 root.queueMicrotask(() => {
                     if (scheduledNativeStart !== pending || !contextAvailable()) return;
+                    publishDictation();
+                    if (scheduledNativeStart !== pending || dictationHeld) return;
                     scheduledNativeStart = null;
                     const latest = adapter.find(item.id);
                     if (!latest?.read || latest.read.disabled || latest.signature !== item.signature
@@ -566,6 +591,7 @@
             if (disposed) return;
             disposed = true;
             enabled = false;
+            dispatch(DICTATION_EVENT, { state: 'unknown', conversation: null });
             controller.dispose();
             observer?.disconnect();
             if (scanInterval !== null) root.clearInterval?.(scanInterval);
@@ -575,7 +601,28 @@
             if (chrome.runtime && !chrome.runtime.id) { invalidate(); return false; }
             return true;
         };
-        const scan = () => { if (initialized && contextAvailable()) controller.scan(adapter.snapshot()); };
+        const publishDictation = (force = false) => {
+            const state = adapter.dictationState();
+            const conversation = new URL(root.location.href).pathname.replace(/\/$/, '') || '/';
+            const key = `${conversation}:${state}`;
+            const held = pauseWhileDictating && (state === 'recording' || state === 'starting'
+                || (state === 'unknown' && dictationHeld));
+            // Deliver the end transition to the player before releasing any
+            // queued start, so its existing paused owner remains authoritative.
+            if (force || key !== lastDictation) {
+                lastDictation = key;
+                dispatch(DICTATION_EVENT, { state, conversation });
+            }
+            if (held !== dictationHeld) {
+                dictationHeld = held;
+                controller.setDictating(held);
+            }
+        };
+        const scan = () => {
+            if (!initialized || !contextAvailable()) return;
+            publishDictation();
+            controller.scan(adapter.snapshot());
+        };
         const scheduleScan = () => {
             if (scanScheduled) return;
             scanScheduled = true;
@@ -585,9 +632,14 @@
             if (!contextAvailable()) return;
             settingsRevision += 1;
             enabled = value?.autoReadAloud === true;
+            pauseWhileDictating = value?.pauseWhileDictating === true;
+            if (initialized) publishDictation();
             if (initialized) controller.setEnabled(enabled, adapter.snapshot());
         };
         document.addEventListener('ae-read-aloud-player:extension-invalidated', invalidate);
+        document.addEventListener(DICTATION_REQUEST, () => {
+            if (initialized && contextAvailable()) publishDictation(true);
+        });
         document.addEventListener(PLAYBACK_EVENT, event => { if (!disposed) controller.playback(event.detail); });
         document.addEventListener(QUEUE_REQUEST, () => { if (!disposed) controller.publish(); });
         document.addEventListener(QUEUE_COMMAND, event => {
@@ -657,6 +709,7 @@
             } catch (_error) { /* Remain off if storage is unavailable. */ }
             if (!contextAvailable()) return;
             initialized = true;
+            publishDictation();
             controller.setEnabled(enabled, adapter.snapshot());
             observer = new root.MutationObserver(mutations => {
                 if (mutations.some(mutation => {
@@ -666,7 +719,7 @@
             });
             observer.observe(document.body, {
                 subtree: true, childList: true, characterData: true, attributes: true,
-                attributeFilter: ['data-talvt-turn-state', 'data-is-streaming', 'aria-label', 'aria-pressed', 'disabled']
+                attributeFilter: ['data-talvt-turn-state', 'data-is-streaming', 'aria-label', 'aria-pressed', 'aria-disabled', 'disabled']
             });
             root.addEventListener('popstate', scheduleScan);
             document.addEventListener('visibilitychange', scheduleScan);

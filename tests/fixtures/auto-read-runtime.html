@@ -10,19 +10,20 @@
  const assert=(value,message)=>{if(!value)throw new Error(message);};
  const settle=()=>new Promise(resolve=>setTimeout(resolve,0));
  async function check(name,fn){try{await fn();results.push({name,pass:true});}catch(e){results.push({name,pass:false,error:e.message});}}
- function sharedStorage(enabled=false){
-  const listeners=[];let settings={autoReadAloud:enabled};
+ function sharedStorage(enabled=false,pauseWhileDictating=false){
+  const listeners=[];let settings={autoReadAloud:enabled,pauseWhileDictating};
   return {
    local:{get:async()=>({ae_player_settings:settings})},
    onChanged:{addListener:fn=>listeners.push(fn)},
-   set(value){settings={autoReadAloud:value};listeners.forEach(fn=>fn({ae_player_settings:{newValue:settings}},'local'));}
+   set(value,pause=settings.pauseWhileDictating){settings={autoReadAloud:value,pauseWhileDictating:pause};listeners.forEach(fn=>fn({ae_player_settings:{newValue:settings}},'local'));}
   };
  }
  function turn(id,answer,state='complete',read=true){return `<div data-turn-key="${id}"><div data-talvt-turn-state="${state}"><div><h4 data-conversation-role="user">You said:</h4><button aria-label="Edit message"></button></div><div><h4 data-conversation-role="assistant">ChatGPT said:</h4><div data-dil-message-id="message-${id}">${answer}</div>${read?'<button aria-label="Read aloud" aria-pressed="false"></button>':''}</div></div></div>`;}
  async function tab(storage,{history='',href='https://chatgpt.com/c/test'}={}){
   const frame=document.createElement('iframe');document.body.append(frame);
   const doc=frame.contentDocument;doc.body.innerHTML=`<main><div aria-label="Conversation">${history}</div><div id="prompt-textarea" contenteditable="true" role="textbox"></div><button aria-label="Send"></button></main>`;
-  const clicks=[];const intents=[];const cancelled=[];const warnings=[];const snapshots=[];const timers=new Map();let nextTimer=0;let listener;let session=0;let tick;
+  const clicks=[];const intents=[];const cancelled=[];const warnings=[];const snapshots=[];const dictation=[];const timers=new Map();let nextTimer=0;let listener;let session=0;let tick;
+  doc.addEventListener('ae-read-aloud-player:dictation',e=>dictation.push(e.detail));
   const runtime={id:'test-extension',onMessage:{addListener:fn=>listener=fn}};
   const publish=(state,extra={})=>doc.dispatchEvent(new CustomEvent('ae-read-aloud-player:playback',{detail:{sessionId:session,state,...extra}}));
   doc.addEventListener('ae-read-aloud-player:playback-intent',e=>intents.push(e.detail));
@@ -40,7 +41,7 @@
    setInterval(fn){tick=fn;return 1;},clearInterval(){tick=null;},addEventListener(){}});
   await settle();
   return {
-   doc,clicks,cancelled,publish,location,warnings,runtime,tick(){tick?.();},
+   doc,clicks,cancelled,publish,location,warnings,runtime,dictation,tick(){tick?.();},
    queue(){return snapshots.at(-1);},
    command(action,id,extra={}){doc.dispatchEvent(new CustomEvent('ae-read-aloud-player:queue-command',{detail:{action,id,...extra}}));},
    async send(id,answer='A new answer',read=true){
@@ -53,6 +54,29 @@
    expire(){for(const fn of [...timers.values()])fn();}
   };
  }
+ await check('DOM dictation states hold queued starts and release during transcription without a hotkey listener',async()=>{
+  const t=await tab(sharedStorage(true,true));
+  t.doc.querySelector('main').insertAdjacentHTML('beforeend','<div id="dictation"><button aria-label="Cancel dictation"></button><button aria-label="Stop dictation"></button></div>');
+  await settle();assert(t.dictation.at(-1).state==='recording','recording was not detected');
+  await t.send('dictation-waiting');assert(t.clicks.length===0,'recording did not hold the queue');
+  t.doc.getElementById('dictation').innerHTML='<button aria-label="Cancel transcription"></button><button aria-label="Stop dictation" disabled></button>';
+  await settle();assert(t.dictation.at(-1).state==='transcribing','disabled stop was treated as recording');
+  assert(t.clicks.join(',')==='dictation-waiting','transcription did not release the queue');
+ });
+ await check('Unknown dictation markup holds conservatively until idle or setting disable',async()=>{
+  const storage=sharedStorage(true,true),t=await tab(storage);
+  t.doc.querySelector('main').insertAdjacentHTML('beforeend','<div id="dictation"><button aria-label="Cancel dictation"></button><button aria-label="Stop dictation"></button></div>');
+  await settle();await t.send('waiting');t.doc.getElementById('dictation').replaceChildren();await settle();
+  assert(t.clicks.length===0,'unknown markup released the queue');storage.set(true,false);await settle();
+  assert(t.clicks.join(',')==='waiting','disabling dictation pause did not release held work');
+ });
+ await check('Dictation controls never look like generation controls and invalidation reports unknown',async()=>{
+  const t=await tab(sharedStorage(true,true),{history:turn('old','Historical answer')});
+  t.doc.querySelector('main').insertAdjacentHTML('beforeend','<button aria-label="Cancel dictation"></button><button aria-label="Stop dictation"></button><button aria-label="Transcribe and send"></button>');
+  await settle();assert(t.clicks.length===0,'dictation armed historical narration');
+  t.doc.dispatchEvent(new CustomEvent('ae-read-aloud-player:extension-invalidated'));
+  assert(t.dictation.at(-1).state==='unknown'&&t.dictation.at(-1).conversation===null,'invalidation retained dictation ownership');
+ });
  await check('Hydrating and focusing historical conversations stays silent while enabled',async()=>{
   const t=await tab(sharedStorage(true));await t.history('loaded-history');await t.history('another-history');assert(t.clicks.length===0,'historical content started');
  });

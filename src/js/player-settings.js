@@ -25,7 +25,8 @@
         skipForwardSeconds: 15,
         playbackRate: 1,
         theme: THEME.SYSTEM,
-        autoReadAloud: false
+        autoReadAloud: false,
+        pauseWhileDictating: false
     });
 
     const clampSkipSeconds = (value, fallback) => {
@@ -63,7 +64,8 @@
             settings.playbackRate ?? settings.playbackSpeed ?? settings.defaultPlaybackRate
         ),
         theme: normalizeTheme(settings.theme),
-        autoReadAloud: settings.autoReadAloud === true
+        autoReadAloud: settings.autoReadAloud === true,
+        pauseWhileDictating: settings.pauseWhileDictating === true
     });
 
     window.AEPlayerSettings = Object.freeze({

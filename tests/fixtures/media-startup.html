@@ -24,14 +24,40 @@ async function setup(){
 }
 document.getElementById('run').onclick=async()=>{
  document.getElementById('run').disabled=true;const results=[];document.getElementById('results').replaceChildren();document.getElementById('summary').textContent='Running…';
- for(const mode of ['cached','early']){
+ for(const mode of ['cached','early','dictation','dictation-loading']){
   let t,a;
   try{
-   t=await setup();t.select();const request=mode==='early'?t.w.fetch('/backend-api/synthesize'):null;
+   t=await setup();
+   const dictation=state=>t.d.dispatchEvent(new t.w.CustomEvent('ae-read-aloud-player:dictation',{detail:{state,conversation:new URL(t.w.location.href).pathname.replace(/\/$/,'')||'/'}}));
+   if(mode.startsWith('dictation'))t.d.dispatchEvent(new t.w.CustomEvent('ae-read-aloud-player:settings',{detail:{settings:{pauseWhileDictating:true}}}));
+   t.select();const request=(mode==='early'||mode==='dictation-loading')?t.w.fetch('/backend-api/synthesize'):null;
    a=t.audio();await a.play();await until(()=>t.d.querySelector('#ae_enhanced_player'));const session=t.states.at(-1).sessionId;
+   if(mode==='dictation-loading'){
+    dictation('recording');assert(t.d.querySelector('.ae-dictation-status').textContent==='','unexpected dictation status while audio is unready');
+    t.finish();await request;
+    await until(()=>t.d.querySelector('[aria-label="Pause"]:not(:disabled)'));
+    dictation('recording');
+    await new Promise(resolve=>setTimeout(resolve,250));
+    assert(!a.paused,'audio paused late after preparation');
+    assert(t.d.querySelector('.ae-dictation-status').textContent==='','dictation acquired a late pause');
+    dictation('idle');assert(!a.paused,'ending dictation changed untouched playback');
+    dictation('recording');await until(()=>t.d.querySelector('[aria-label="Play"]'));
+    assert(a.paused,'a new recording did not pause now-ready audio');
+    dictation('idle');await until(()=>t.states.at(-1).state==='playing');
+    results.push({name:'unready audio stays untouched until a new recording starts',pass:true});continue;
+   }
    if(request){t.finish();await request;}
    await until(()=>t.d.querySelector('[aria-label="Pause"]:not(:disabled)'));
    assert(t.states.at(-1).sessionId===session,'capture reset the playing session');
+   if(mode==='dictation'){
+    a.currentTime=3;dictation('recording');await until(()=>t.d.querySelector('[aria-label="Play"]'));
+    assert(a.paused,'dictation did not pause page audio');
+    const pausedAt=Number(t.d.querySelector('.ae-current-time').textContent.split(':').at(-1));
+    assert(pausedAt>=3,'dictation lost the playback position');
+    dictation('transcribing');await until(()=>t.states.at(-1).state==='playing');
+    assert(t.d.querySelector('.ae-dictation-status').style.display==='none','status remained after resume');
+    results.push({name:'dictation pauses and resumes production media at the same position',pass:true});continue;
+   }
    a.currentTime=3;t.d.querySelector('[aria-label="Pause"]').click();await until(()=>!!t.d.querySelector('[aria-label="Play"]'));
    t.d.querySelector('[aria-label="Play"]').click();await until(()=>t.states.at(-1).state==='playing');
    assert(t.d.querySelector('[aria-label="Download audio"]:not(:disabled)'),'download unavailable');

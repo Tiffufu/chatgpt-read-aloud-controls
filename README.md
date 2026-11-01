@@ -11,6 +11,8 @@ Listen to ChatGPT with a floating player and a reading queue you can manage. Pau
 
 This extension is independently maintained and is not affiliated with OpenAI.
 
+This branch includes an unreleased, optional **Pause audio while dictating** experiment. See [dictation behavior and limitations](docs/USAGE.md#pause-audio-while-dictating-experimental) before trying it. The latest release download below remains the stable version.
+
 ## What it does
 
 - **Manage your listening queue.** Select another response’s Read Aloud to add it without interrupting playback. Reorder by dragging or using arrows, remove entries, clear upcoming responses, and Undo a removal.

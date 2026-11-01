@@ -50,6 +50,59 @@ test('auto-read defaults off and survives normalization of saved settings', () =
     assert.equal(window.AEPlayerSettings.normalizeSettings({ autoReadAloud: 'false' }).autoReadAloud, false);
 });
 
+test('dictation pause is opt-in and accepts only a saved boolean', () => {
+    const window = {};
+    vm.runInNewContext(fs.readFileSync(path.join(root, 'src/js/player-settings.js'), 'utf8'), { window });
+    const normalize = window.AEPlayerSettings.normalizeSettings;
+    assert.equal(normalize({}).pauseWhileDictating, false);
+    assert.equal(normalize({ pauseWhileDictating: true }).pauseWhileDictating, true);
+    assert.equal(normalize({ pauseWhileDictating: 'true' }).pauseWhileDictating, false);
+});
+
+test('dictation holds new queued starts without losing completion order', () => {
+    const h = harness();
+    h.controller.setDictating(true);
+    h.submit([turn('a')], { userKey: 'user-2' });
+    h.submit([turn('a'), turn('b')], { userKey: 'user-3' });
+    assert.deepEqual(h.starts, []);
+    h.controller.setDictating(false);
+    assert.deepEqual(h.starts.map(x => x.id), ['a']);
+    h.state('playing', 1, { requestId: h.starts[0].requestId, responseId: 'a' });
+    h.state('ended');
+    assert.deepEqual(h.starts.map(x => x.id), ['a', 'b']);
+});
+
+test('dictation holds a successor after the current response finishes', () => {
+    const h = harness();
+    h.state('playing');
+    h.submit([turn('next')], { userKey: 'user-2' });
+    h.controller.setDictating(true);
+    h.state('ended');
+    assert.deepEqual(h.starts, []);
+    h.controller.setDictating(false);
+    assert.deepEqual(h.starts.map(x => x.id), ['next']);
+});
+
+test('adapter distinguishes enabled recording controls from transcription and unknown states', () => {
+    const buttons = new Map();
+    const document = { querySelector(selector) { return buttons.get(selector) || null; } };
+    const adapter = load().createChatGPTAdapter(document, { href: 'https://chatgpt.com/c/test' });
+    assert.equal(adapter.dictationState(), 'unknown');
+    buttons.set('button[aria-label="Dictate"]', {});
+    assert.equal(adapter.dictationState(), 'idle');
+    buttons.clear();
+    buttons.set('button[aria-label="Starting dictation; click to cancel"]', {});
+    assert.equal(adapter.dictationState(), 'starting');
+    buttons.clear();
+    buttons.set('button[aria-label="Cancel dictation"]', {});
+    buttons.set('button[aria-label="Stop dictation"]', { disabled: false, getAttribute: () => null });
+    assert.equal(adapter.dictationState(), 'recording');
+    buttons.get('button[aria-label="Stop dictation"]').disabled = true;
+    assert.equal(adapter.dictationState(), 'unknown');
+    buttons.set('button[aria-label="Cancel transcription"]', {});
+    assert.equal(adapter.dictationState(), 'transcribing');
+});
+
 test('historical responses and late history hydration never start narration', () => {
     const h = harness(snapshot([turn('old')]));
     h.scan([turn('earlier'), turn('old')]);

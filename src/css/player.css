@@ -61,6 +61,13 @@
     padding:5px 0;
 }
 
+#ae_enhanced_player .ae-dictation-status {
+    padding:4px 16px;
+    color:var(--ae-muted);
+    font-size:12px;
+    line-height:1.4;
+}
+
 #ae_enhanced_player .ae-window-controls {
     display:flex;
     flex:none;

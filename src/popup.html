@@ -40,6 +40,12 @@
         <span>Automatically read new responses aloud</span>
       </label>
 
+      <label class="checkbox-field" for="pauseWhileDictating">
+        <input id="pauseWhileDictating" name="pauseWhileDictating" type="checkbox" aria-describedby="dictationHelp" />
+        <span>Pause audio while dictating</span>
+      </label>
+      <p id="dictationHelp" class="muted">Pauses ready audio and resumes when dictation ends.</p>
+
       <p id="status" class="muted" aria-live="polite"></p>
     </form>
     <script src="js/player-settings.js"></script>

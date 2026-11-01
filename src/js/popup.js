@@ -26,6 +26,7 @@
     const playbackRateSelect = document.getElementById('playbackRate');
     const themeSelect = document.getElementById('theme');
     const autoReadCheckbox = document.getElementById('autoReadAloud');
+    const dictationCheckbox = document.getElementById('pauseWhileDictating');
     const status = document.getElementById('status');
 
     if (!settingsApi) {
@@ -78,6 +79,7 @@
         playbackRateSelect.value = String(settings.playbackRate);
         themeSelect.value = settings.theme;
         autoReadCheckbox.checked = settings.autoReadAloud;
+        dictationCheckbox.checked = settings.pauseWhileDictating;
     };
 
     const readForm = () => normalizeSettings({
@@ -85,7 +87,8 @@
         skipForwardSeconds: skipForwardInput.value,
         playbackRate: playbackRateSelect.value,
         theme: themeSelect.value,
-        autoReadAloud: autoReadCheckbox.checked
+        autoReadAloud: autoReadCheckbox.checked,
+        pauseWhileDictating: dictationCheckbox.checked
     });
 
     const persist = async () => {
@@ -127,6 +130,7 @@
         playbackRateSelect.addEventListener('change', persist);
         themeSelect.addEventListener('change', persist);
         autoReadCheckbox.addEventListener('change', persist);
+        dictationCheckbox.addEventListener('change', persist);
 
         // The error belongs to the current tab, rather than the global preference.
         if (chromeApi?.tabs?.query && chromeApi?.tabs?.sendMessage) {

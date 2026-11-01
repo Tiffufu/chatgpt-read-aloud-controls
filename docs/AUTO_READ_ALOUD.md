@@ -13,6 +13,7 @@ new permissions, services, or dependencies.
   generation cycle. Per-message rendering transitions alone are not sufficient.
 - Eligible responses wait in completion order behind the tab's current playback,
   including manually started and paused playback.
+- With optional dictation pause enabled, new queued starts also wait while ChatGPT dictation is starting or recording. Admission and ordering are unchanged. See [dictation behavior](USAGE.md#pause-audio-while-dictating-experimental) for preparation and automatic-stop limitations.
 - The queue advances on actual completion of the authoritative audio owner.
   Buffer completion and the handoff to captured playback do not advance it.
 - Closing the player clears that tab's queue. Disabling automatic reading removes
