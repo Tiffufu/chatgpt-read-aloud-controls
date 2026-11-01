@@ -92,6 +92,57 @@ select:focus {
   accent-color: currentColor;
 }
 
+.checkbox-setting {
+  display: grid;
+  gap: 8px;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+}
+
+.checkbox-row .checkbox-field {
+  flex: 1;
+}
+
+.info-button {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  flex: 0 0 24px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  background: transparent;
+  color: #666666;
+  font: 650 13px/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.info-button:hover,
+.info-button[aria-expanded="true"] {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.info-button:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+.setting-help {
+  padding: 10px;
+  border-radius: 9px;
+  background: rgba(0, 0, 0, 0.04);
+}
+
+#status:empty {
+  display: none;
+}
+
 @media (prefers-color-scheme: dark) {
   body {
     background: #28292b;
@@ -112,5 +163,15 @@ select:focus {
 
   .muted {
     color: #d7dce4;
+  }
+
+  .info-button {
+    color: #d7dce4;
+  }
+
+  .info-button:hover,
+  .info-button[aria-expanded="true"],
+  .setting-help {
+    background: rgba(255, 255, 255, 0.08);
   }
 }

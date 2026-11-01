@@ -8,6 +8,8 @@
 (function () {
     'use strict';
 
+    const DICTATION_REWIND_SECONDS = 3;
+
     let audio = null;
     let controlsDiv = null;
     let titleBarDiv = null;
@@ -1597,6 +1599,11 @@
             || dictationInvalidated) return;
         const resume = { owner: pending.owner, revision: dictationRevision };
         try {
+            try {
+                pending.owner.currentTime = Math.max(0, pending.owner.currentTime - DICTATION_REWIND_SECONDS);
+            } catch (_error) {
+                // Regaining context is best effort; a failed seek must not block resume.
+            }
             dictationResume = resume;
             let playing;
             try { playing = pending.owner.play(); }

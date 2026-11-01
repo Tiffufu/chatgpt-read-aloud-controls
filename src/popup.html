@@ -40,11 +40,16 @@
         <span>Automatically read new responses aloud</span>
       </label>
 
-      <label class="checkbox-field" for="pauseWhileDictating">
-        <input id="pauseWhileDictating" name="pauseWhileDictating" type="checkbox" aria-describedby="dictationHelp" />
-        <span>Pause audio while dictating</span>
-      </label>
-      <p id="dictationHelp" class="muted">Pauses ready audio and resumes when dictation ends.</p>
+      <div class="checkbox-setting">
+        <div class="checkbox-row">
+          <label class="checkbox-field" for="pauseWhileDictating">
+            <input id="pauseWhileDictating" name="pauseWhileDictating" type="checkbox" />
+            <span>Pause audio while dictating</span>
+          </label>
+          <button id="dictationHelpButton" class="info-button" type="button" aria-label="About pausing audio during dictation" aria-expanded="false" aria-controls="dictationHelp">i</button>
+        </div>
+        <p id="dictationHelp" class="setting-help muted" hidden>Pauses Read Aloud during dictation, then resumes 3 seconds earlier. Audio still loading when recording begins won’t be paused.</p>
+      </div>
 
       <p id="status" class="muted" aria-live="polite"></p>
     </form>

@@ -27,7 +27,22 @@
     const themeSelect = document.getElementById('theme');
     const autoReadCheckbox = document.getElementById('autoReadAloud');
     const dictationCheckbox = document.getElementById('pauseWhileDictating');
+    const dictationHelpButton = document.getElementById('dictationHelpButton');
+    const dictationHelp = document.getElementById('dictationHelp');
     const status = document.getElementById('status');
+
+    dictationHelpButton.addEventListener('click', () => {
+        dictationHelp.hidden = !dictationHelp.hidden;
+        dictationHelpButton.setAttribute('aria-expanded', String(!dictationHelp.hidden));
+    });
+    document.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape' || dictationHelp.hidden) return;
+        event.preventDefault();
+        event.stopPropagation();
+        dictationHelp.hidden = true;
+        dictationHelpButton.setAttribute('aria-expanded', 'false');
+        dictationHelpButton.focus();
+    });
 
     if (!settingsApi) {
         status.textContent = SETTINGS_MODULE_ERROR;
@@ -60,7 +75,7 @@
         status.textContent = message;
         window.clearTimeout(statusTimer);
         statusTimer = window.setTimeout(() => {
-            status.textContent = 'Changes apply to active ChatGPT tabs.';
+            status.textContent = '';
         }, 1800);
     };
 
@@ -115,7 +130,7 @@
         }
 
         render();
-        status.textContent = 'Changes apply to active ChatGPT tabs.';
+        status.textContent = '';
 
         form.addEventListener('submit', (event) => {
             event.preventDefault();

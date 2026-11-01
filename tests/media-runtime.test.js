@@ -885,7 +885,7 @@ test('dictation pause is off by default and starts only on confirmed recording',
     assert.equal(page.paused, true);
 });
 
-test('dictation resumes only its paused owner at the preserved position', async () => {
+test('dictation resumes only its paused owner three seconds earlier exactly once', async () => {
     const { h, page } = await dictationHarness();
     const competitor = h.createAudio('blob:competitor');
     dictationEvent(h, 'recording');
@@ -897,9 +897,49 @@ test('dictation resumes only its paused owner at the preserved position', async 
     dictationEvent(h, 'transcribing');
     await h.flushMicrotasks();
     assert.equal(captured.paused, false);
-    assert.equal(captured.currentTime, 30);
+    assert.equal(captured.currentTime, 27);
     assert.equal(competitor.playCalls, 0);
     dictationEvent(h, 'idle');
+    assert.equal(captured.playCalls, 1);
+    assert.equal(captured.currentTime, 27);
+});
+
+test('dictation rewind stops at the beginning of audio', async () => {
+    const { h, page } = await dictationHarness();
+    page.currentTime = 1;
+    dictationEvent(h, 'recording');
+    dictationEvent(h, 'idle');
+    await h.flushMicrotasks();
+    const captured = h.capturedAudioElements[0];
+    assert.equal(captured.currentTime, 0);
+    assert.equal(captured.paused, false);
+});
+
+test('a failed dictation rewind still resumes from the paused position', async () => {
+    const { h } = await dictationHarness();
+    dictationEvent(h, 'recording');
+    const captured = h.capturedAudioElements[0];
+    let attempted = false;
+    Object.defineProperty(captured, 'currentTime', {
+        get: () => 30,
+        set: () => { attempted = true; throw new Error('seek unavailable'); }
+    });
+    dictationEvent(h, 'idle');
+    await h.flushMicrotasks();
+    assert.equal(attempted, true);
+    assert.equal(captured.paused, false);
+    assert.equal(captured.currentTime, 30);
+});
+
+test('manual resume after dictation takeover does not rewind', async () => {
+    const { h } = await dictationHarness();
+    dictationEvent(h, 'recording');
+    const captured = h.capturedAudioElements[0];
+    h.findButton('Play').click();
+    await h.flushMicrotasks();
+    dictationEvent(h, 'idle');
+    await h.flushMicrotasks();
+    assert.equal(captured.currentTime, 30);
     assert.equal(captured.playCalls, 1);
 });
 
