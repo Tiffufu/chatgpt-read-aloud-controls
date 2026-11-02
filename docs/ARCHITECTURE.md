@@ -50,7 +50,7 @@ Close and response replacement release the captured element and revoke its URL. 
 Closing marks the current session closed before teardown. Pending response reads, duration probes, and captured-player readiness callbacks check that state before allocating media or changing the UI. A captured owner also remains authoritative after its `ended` flag is set; passive page discovery cannot replace it. Ownership changes through explicit close, a new speech-response session, or a fresh native Read Aloud selection.
 
 A fresh Read Aloud intent can associate the next eligible native audio play within
-15 seconds, allowing the player to mount before a speech fetch resolves. A late
+15 seconds, allowing the player to mount before a speech fetch resolves. This deadline applies when `play()` is called: a pending play that was associated on time remains eligible when playback begins later, while cancellation, replacement and owner checks still apply. A late
 capture attaches to that session without replacing its active audio or position.
 When there is no speech request, the player reads the already-playing selected
 blob for capture; it does not synthesize or prefetch queued responses. If the blob

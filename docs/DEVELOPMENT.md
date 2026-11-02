@@ -47,7 +47,7 @@ python3 -m http.server 8000 --bind 127.0.0.1
 | `tests/fixtures/quiet-player.html` | Focus across minimization, shared transport, skip values, and drawer preference. |
 | `tests/fixtures/auto-read-runtime.html` | Native clicks, queue operations, generation detection, cancellation, failures, and invalidation. |
 | `tests/fixtures/auto-read-aloud.html` | DOM adapter and controller integration. |
-| `tests/fixtures/media-startup.html` | Click **Run silent playback checks** to verify cached and early native audio mounts the production player and preserves Pause/Resume and download. |
+| `tests/fixtures/media-startup.html` | Click **Run silent playback checks** to verify cached, early, and delayed native audio mounts the production player and preserves Pause/Resume and download. The delayed case advances the fixture clock 21 seconds between requesting play and allowing real media playback. |
 | `tests/fixtures/long-audio.html` | Production capture and playback using a local recording selected by the tester. |
 | `src/popup.html` | Actual settings UI; uses defaults when extension storage is unavailable. |
 
@@ -72,7 +72,7 @@ After runtime changes, reload the unpacked extension and refresh a ChatGPT tab:
 5. Minimize and expand with the drawer both open and closed. Confirm the same skip values, position, and drawer preference.
 6. Finish a response and confirm progression keeps the player mounted.
 7. Turn automatic reading on; generate a new response. Opening history and focusing a tab must stay silent.
-8. Check independent tabs, background completion, turning automatic reading off, Close, conversation navigation, and an extension reload.
+8. Check independent tabs, background completion, turning automatic reading off, Close, conversation navigation, and an extension reload. Include a submitted response taking over 15 seconds without an intermediate generation render, and a cached play requested on time but resolved after 15 seconds; cancellation and unrelated audio must remain excluded.
 9. Check light/dark appearance, long titles, narrow viewports, keyboard controls, and download states.
 10. Check failure recovery and unexpected console errors. Use actual speech input separately when validating dictated submissions.
 11. For dictation pause, check the off-by-default setting, button and remapped shortcut, cancellation, transcription, manual Play/Pause/seek/skip takeover, Close, navigation, independent tabs and extension invalidation. Start recording before capture is ready and verify playback stays untouched throughout that recording, including after readiness arrives; the next recording can pause now-ready audio. Confirm automatic resume rewinds three seconds once, clamps at the beginning, and manual Play resumes without that rewind. Open the settings information button with click, Enter and Space; Escape should close help and restore focus. Confirm queued starts wait while recording. Exercise a long unattended recording separately; do not assume a fixed timeout or claim its cause is distinguishable.

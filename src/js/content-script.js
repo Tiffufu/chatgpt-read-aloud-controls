@@ -693,10 +693,10 @@
 
     // A native replay may use a cached blob, or play before fetch resolves.
     // Only a fresh explicit selection can establish ownership without capture.
-    const pendingIntentForAudio = (element, playSequence) => {
+    const pendingIntentForAudio = (element, playSequence, confirmingPlay = false) => {
         const intent = readAloudIntent;
         if (!intent || playerSession.intent === intent
-            || Date.now() - intent.startedAt > READ_ALOUD_AUDIO_ASSOCIATION_WINDOW_MS
+            || (!confirmingPlay && Date.now() - intent.startedAt > READ_ALOUD_AUDIO_ASSOCIATION_WINDOW_MS)
             || playSequence <= intent.playSequence || extensionOwnedAudioElements.has(element)
             || element.srcObject) return null;
         const source = getAudioSource(element);
@@ -1917,7 +1917,9 @@
                             return;
                         }
                         audioPlaySequences.set(this, playSequence);
-                        if (pendingIntent && pendingIntentForAudio(this, playSequence) === pendingIntent
+                        // The association deadline applies when play is requested;
+                        // the browser may defer actual playback in a hidden tab.
+                        if (pendingIntent && pendingIntentForAudio(this, playSequence, true) === pendingIntent
                             && !cancelledSpeechRequests.has(pendingIntent.requestId)) {
                             bindIntentAudio(this, playSequence, pendingIntent);
                         }

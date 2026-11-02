@@ -83,6 +83,17 @@
  await check('A new fast response starts native Read Aloud once without a manual read click',async()=>{
   const t=await tab(sharedStorage(true),{history:turn('old','Old answer')});await t.send('new');assert(t.clicks.join(',')==='new','new response did not start');t.doc.dispatchEvent(new Event('visibilitychange'));await settle();assert(t.clicks.length===1,'focus repeated playback');
  });
+ await check('An acknowledged background submission survives a delayed complete-only render',async()=>{
+  const nativeNow=Date.now;let now=nativeNow();Date.now=()=>now;
+  try{
+   const t=await tab(sharedStorage(true),{history:turn('old','Old answer')});
+   t.doc.getElementById('prompt-textarea').textContent='Delayed test submission';t.doc.querySelector('button[aria-label="Send"]').click();
+   const user=t.doc.createElement('div');user.setAttribute('data-turn-key','submitted-user');user.innerHTML='<h4 data-conversation-role="user">You said:</h4><button aria-label="Edit message"></button>';
+   t.doc.querySelector('[aria-label="Conversation"]').append(user);await settle();
+   now+=21000;t.doc.querySelector('[aria-label="Conversation"]').insertAdjacentHTML('beforeend',turn('delayed','Delayed answer'));await settle();
+   assert(t.clicks.join(',')==='delayed','acknowledged submission expired before completion');
+  }finally{Date.now=nativeNow;}
+ });
  await check('Current assistant markup starts automatically and publishes its excerpt',async()=>{
   const t=await tab(sharedStorage(true));
   t.doc.getElementById('prompt-textarea').textContent='Test submission';t.doc.querySelector('button[aria-label="Send"]').click();

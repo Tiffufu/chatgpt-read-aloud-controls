@@ -11,8 +11,11 @@ function silentWave(){
 }
 const assert=(value,message)=>{if(!value)throw new Error(message);};
 async function until(fn){const end=Date.now()+5000;while(!fn()){if(Date.now()>end)throw new Error('Timed out waiting for media state');await new Promise(r=>setTimeout(r,20));}}
-async function setup(){
+async function setup(delayFirstPlay=false){
  const frame=document.createElement('iframe');document.body.append(frame);const w=frame.contentWindow,d=frame.contentDocument;
+ const nativeNow=w.Date.now.bind(w.Date);let clockOffset=0;w.Date.now=()=>nativeNow()+clockOffset;
+ let releasePlay,playDelayed=false;const nativePlay=w.HTMLMediaElement.prototype.play;
+ if(delayFirstPlay)w.HTMLMediaElement.prototype.play=function(){if(playDelayed)return nativePlay.call(this);playDelayed=true;const owner=this;return new Promise((resolve,reject)=>{releasePlay=()=>nativePlay.call(owner).then(resolve,reject);});};
  d.title='Media startup fixture';let finish;const response=()=>new w.Response(silentWave(),{headers:{'content-type':'audio/wav'}});
  const nativeFetch=w.fetch.bind(w);w.fetch=input=>String(input).includes('/backend-api/synthesize')?new Promise(resolve=>{finish=()=>resolve(response());}):nativeFetch(input);
  for(const file of ['player-settings','aac-container','media-timeline','captured-playback','reading-queue','content-script']){
@@ -20,18 +23,18 @@ async function setup(){
  }
  const link=d.createElement('link');link.rel='stylesheet';link.href=new URL('../../src/css/player.css',location.href);d.head.append(link);
  const states=[];d.addEventListener('ae-read-aloud-player:playback',e=>states.push(e.detail));
- return {w,d,states,frame,finish:()=>finish(),audio(){const a=d.createElement('audio');a.muted=true;a.src=w.URL.createObjectURL(new w.Blob([silentWave()],{type:'audio/wav'}));return a;},select(){d.dispatchEvent(new w.CustomEvent('ae-read-aloud-player:playback-intent',{detail:{responseId:'sample',requestId:null}}));},cleanup(a){d.querySelector('[aria-label="Close player"]')?.click();a.pause();w.URL.revokeObjectURL(a.src);frame.remove();}};
+ return {w,d,states,frame,finish:()=>finish(),releasePlay:()=>releasePlay(),advanceClock:ms=>{clockOffset+=ms;},audio(){const a=d.createElement('audio');a.muted=true;a.src=w.URL.createObjectURL(new w.Blob([silentWave()],{type:'audio/wav'}));return a;},select(){d.dispatchEvent(new w.CustomEvent('ae-read-aloud-player:playback-intent',{detail:{responseId:'sample',requestId:null}}));},cleanup(a){d.querySelector('[aria-label="Close player"]')?.click();a.pause();w.URL.revokeObjectURL(a.src);frame.remove();}};
 }
 document.getElementById('run').onclick=async()=>{
  document.getElementById('run').disabled=true;const results=[];document.getElementById('results').replaceChildren();document.getElementById('summary').textContent='Running…';
- for(const mode of ['cached','early','dictation','dictation-loading']){
+ for(const mode of ['cached','early','dictation','dictation-loading','delayed-cached']){
   let t,a;
   try{
-   t=await setup();
+   t=await setup(mode==='delayed-cached');
    const dictation=state=>t.d.dispatchEvent(new t.w.CustomEvent('ae-read-aloud-player:dictation',{detail:{state,conversation:new URL(t.w.location.href).pathname.replace(/\/$/,'')||'/'}}));
    if(mode.startsWith('dictation'))t.d.dispatchEvent(new t.w.CustomEvent('ae-read-aloud-player:settings',{detail:{settings:{pauseWhileDictating:true}}}));
    t.select();const request=(mode==='early'||mode==='dictation-loading')?t.w.fetch('/backend-api/synthesize'):null;
-   a=t.audio();await a.play();await until(()=>t.d.querySelector('#ae_enhanced_player'));const session=t.states.at(-1).sessionId;
+   a=t.audio();const play=a.play();if(mode==='delayed-cached'){t.advanceClock(21000);t.releasePlay();}await play;await until(()=>t.d.querySelector('#ae_enhanced_player'));const session=t.states.at(-1).sessionId;
    if(mode==='dictation-loading'){
     dictation('recording');assert(t.d.querySelector('.ae-dictation-status').textContent==='','unexpected dictation status while audio is unready');
     t.finish();await request;

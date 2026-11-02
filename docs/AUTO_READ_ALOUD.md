@@ -10,7 +10,7 @@ new permissions, services, or dependencies.
 - Only a newly generated, completed assistant answer is eligible. Opening,
   hydrating, scrolling, or focusing an existing conversation is never a trigger.
 - A submit interaction or an observed native generation control establishes a
-  generation cycle. Per-message rendering transitions alone are not sufficient.
+  generation cycle. Per-message rendering transitions alone are not sufficient. An acknowledged new user turn keeps that cycle eligible if a delayed render skips intermediate generation states; the 15-second stale-submit guard applies only until acknowledgement.
 - Eligible responses wait in completion order behind the tab's current playback,
   including manually started and paused playback.
 - With optional dictation pause enabled, new queued starts also wait while ChatGPT dictation is starting or recording. Admission and ordering are unchanged. See [dictation behavior](USAGE.md#pause-audio-while-dictating-experimental) for preparation and automatic-stop limitations.

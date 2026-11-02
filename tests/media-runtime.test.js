@@ -2198,6 +2198,27 @@ test('expired read intent cannot claim later blob audio', async () => {
     assert.equal(h.context.document.getElementById('ae_enhanced_player'), null);
 });
 
+test('a selected play requested on time retains its player when background playback resolves after the association window', async () => {
+    let now = 1000;
+    const h = createContentScriptHarness({ now: () => now });
+    const states = listenToPlayback(h);
+    h.context.document.visibilityState = 'hidden';
+    selectReadAloud(h, 'delayed-answer', 'auto-delayed');
+    const audio = h.createAudio('blob:delayed-answer');
+    let finish;
+    audio.playImplementation = () => new Promise(resolve => {
+        finish = () => { audio.paused = false; resolve(); };
+    });
+    const play = audio.play();
+    now += 21000;
+    finish();
+    await play;
+    await h.flushMicrotasks();
+    assert.equal(audio.paused, false);
+    assert.ok(h.context.document.getElementById('ae_enhanced_player'));
+    assert.ok(states.some(value => value.state === 'playing' && value.requestId === 'auto-delayed'));
+});
+
 test('cancelled read intent prevents cached audio from starting', async () => {
     const h = createContentScriptHarness();
     selectReadAloud(h, 'answer', 'auto-cached');

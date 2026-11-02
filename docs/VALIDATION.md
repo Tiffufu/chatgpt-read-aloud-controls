@@ -2,14 +2,15 @@
 
 ## Unreleased dictation-pause experiment
 
-Recorded November 1, 2026 after adding the automatic-resume rewind and compact settings help:
+Recorded November 1, 2026 after adding the automatic-resume rewind, compact settings help, and background timing repairs:
 
-- Full Node suite: **144/144 passed**.
+- Full Node suite: **147/147 passed**.
 - Production JavaScript syntax, manifest asset validation, and whitespace checks passed.
-- `tests/fixtures/media-startup.html`: **4/4 passed** in Chrome and the in-app browser, including pause/resume three seconds earlier and verification that audio unready at recording start remains untouched until a new recording starts.
+- `tests/fixtures/media-startup.html`: **5/5 passed** in Chrome, including a play request that resolves 21 simulated seconds later, pause/resume three seconds earlier, and verification that audio unready at recording start remains untouched until a new recording starts.
+- `tests/fixtures/auto-read-runtime.html`: **29/29 passed** in Chrome, including delayed completion of an acknowledged submission without an intermediate generating state.
 - The local settings preview was inspected at its 300-pixel width with help closed and expanded. Click, Enter and Space toggle help; Escape closes it and restores focus. The checkbox remains off by default. Installed toolbar-popup sizing remains a manual check.
 
-A user trial of the earlier experimental version reported working button-based dictation pause/resume. The three-second rewind and revised help have not yet received that live trial. Long unattended timeouts, other interface languages, remapped shortcuts with the installed feature, and packaged ZIP installation remain unverified. Earlier live dictation inspection established observable button, hotkey, cancellation, and transcription states; it did not validate this installed implementation.
+A user trial of the earlier experimental version reported working button-based dictation pause/resume. A subsequent user trial confirmed that the rewind works after reloading the updated extension. Long unattended timeouts, other interface languages, remapped shortcuts with the installed feature, and packaged ZIP installation remain unverified. The latest timing repairs have deterministic regression and browser-fixture coverage; a live background/fullscreen retest remains outstanding. Earlier live dictation inspection established observable button, hotkey, cancellation, and transcription states; it did not validate this installed implementation.
 
 The following release record is historical and does not establish compatibility for this experiment.
 

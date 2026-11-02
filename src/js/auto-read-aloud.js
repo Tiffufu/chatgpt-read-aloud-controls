@@ -198,12 +198,14 @@
                 generationCancelled = false;
                 requestedUserKey = null;
             }
-            if (requestedUserKey !== null && !value.generating && Date.now() - requestedAt > 15000) {
+            const userSubmitted = requestedUserKey === null || (value.userKey !== requestedUserKey
+                && (!requestedUserKey || !value.userKeys || value.userKeys.includes(requestedUserKey)));
+            // A submitted turn can finish while background rendering skips the
+            // generating state. Expire only a submit the page never acknowledged.
+            if (requestedUserKey !== null && !userSubmitted && !value.generating && Date.now() - requestedAt > 15000) {
                 generationOpen = false;
                 requestedUserKey = null;
             }
-            const userSubmitted = requestedUserKey === null || (value.userKey !== requestedUserKey
-                && (!requestedUserKey || !value.userKeys || value.userKeys.includes(requestedUserKey)));
             const canGenerate = enabled && generationOpen && userSubmitted;
             const latestId = value.turns[value.turns.length - 1]?.id;
             const nextRecords = new Map();

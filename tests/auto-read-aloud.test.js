@@ -50,6 +50,28 @@ test('auto-read defaults off and survives normalization of saved settings', () =
     assert.equal(window.AEPlayerSettings.normalizeSettings({ autoReadAloud: 'false' }).autoReadAloud, false);
 });
 
+test('an acknowledged submission survives delayed background completion without an observed generating state', (t) => {
+    let now = 1000;
+    t.mock.method(Date, 'now', () => now);
+    const h = harness();
+    h.controller.beginGeneration();
+    h.scan([], { userKey: 'user-2', userKeys: ['user-1', 'user-2'] });
+    now += 21000;
+    h.scan([turn('delayed-answer')], { userKey: 'user-2', userKeys: ['user-1', 'user-2'] });
+    assert.deepEqual(h.starts.map(item => item.id), ['delayed-answer']);
+});
+
+test('an unacknowledged submit still expires without narrating later history', (t) => {
+    let now = 1000;
+    t.mock.method(Date, 'now', () => now);
+    const h = harness();
+    h.controller.beginGeneration();
+    now += 21000;
+    h.scan([]);
+    h.scan([turn('historical-answer')], { userKey: 'user-2', userKeys: ['user-1', 'user-2'] });
+    assert.deepEqual(h.starts, []);
+});
+
 test('dictation pause is opt-in and accepts only a saved boolean', () => {
     const window = {};
     vm.runInNewContext(fs.readFileSync(path.join(root, 'src/js/player-settings.js'), 'utf8'), { window });
