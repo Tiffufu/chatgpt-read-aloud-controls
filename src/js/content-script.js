@@ -226,7 +226,8 @@
         captureStarted: false,
         responseId: null,
         requestId: null,
-        completedAt: 0
+        completedAt: 0,
+        playbackEnded: false
     });
 
     let playerSession = createPlayerSession();
@@ -254,6 +255,7 @@
         const currentAudio = playerSession.audioElement;
         const sourceUnavailable = currentAudio && !hasElementSource(currentAudio);
         const resolved = state || (playerSession.isClosed || playerSession.id === 0 ? 'closed'
+            : playerSession.playbackEnded ? 'ended'
             : sourceUnavailable ? 'error'
             : currentAudio?.ended ? 'ended'
                 : currentAudio ? (currentAudio.paused ? 'paused' : 'playing') : 'starting');
@@ -278,6 +280,8 @@
         ['playing', 'play', 'pause', 'ended', 'error'].forEach(name => {
             element.addEventListener?.(name, () => {
                 if (playerSession.isClosed || element !== playerSession.audioElement) return;
+                if (name === 'ended') playerSession.playbackEnded = true;
+                else if (name === 'play' || name === 'playing') playerSession.playbackEnded = false;
                 if (dictationPause?.state === 'paused' && ['play', 'playing', 'ended', 'error'].includes(name)) {
                     cancelDictationPause();
                 }
@@ -702,7 +706,8 @@
         const source = getAudioSource(element);
         if (!source.startsWith('blob:') && !isReadAloudResponseUrl(source)) return null;
         const owner = playerSession.audioElement;
-        if (!playerSession.isClosed && hasElementSource(owner) && owner !== element && !owner.ended) return null;
+        if (!playerSession.isClosed && hasElementSource(owner) && owner !== element
+            && !owner.ended && !playerSession.playbackEnded) return null;
         return intent;
     };
 
@@ -1916,6 +1921,7 @@
                             if (audioPlayAttempts.get(this) === playSequence) pauseAudioElement(this);
                             return;
                         }
+                        if (this === playerSession.audioElement && !this.paused) playerSession.playbackEnded = false;
                         audioPlaySequences.set(this, playSequence);
                         // The association deadline applies when play is requested;
                         // the browser may defer actual playback in a hidden tab.

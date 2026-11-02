@@ -181,7 +181,8 @@
                 const assigned = !/\/c\//.test(current.conversation)
                     && /\/c\//.test(value.conversation)
                     && current.userKey === value.userKey
-                    && value.turns.some(turn => generationIds.has(turn.id));
+                    && (value.turns.some(turn => generationIds.has(turn.id))
+                        || (generationOpen && requestedUserKey === null && Boolean(current.userKey)));
                 if (!assigned) {
                     clearQueue();
                     baseline(value);
@@ -200,6 +201,8 @@
             }
             const userSubmitted = requestedUserKey === null || (value.userKey !== requestedUserKey
                 && (!requestedUserKey || !value.userKeys || value.userKeys.includes(requestedUserKey)));
+            // Once acknowledged, older user nodes may be virtualized away.
+            if (requestedUserKey !== null && userSubmitted) requestedUserKey = null;
             // A submitted turn can finish while background rendering skips the
             // generating state. Expire only a submit the page never acknowledged.
             if (requestedUserKey !== null && !userSubmitted && !value.generating && Date.now() - requestedAt > 15000) {

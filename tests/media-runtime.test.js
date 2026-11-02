@@ -2000,6 +2000,49 @@ test('playback lifecycle reports native start and completion even in a hidden ta
     assert.equal(states.at(-1).sessionId, 1);
 });
 
+test('native cleanup after completion cannot turn an ended response back into a paused queue blocker', async () => {
+    const h = createContentScriptHarness();
+    const states = listenToPlayback(h);
+    selectReadAloud(h, 'answer', 'auto-answer');
+    await h.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    const audio = h.createAudio('blob:native-answer');
+    await audio.play();
+    await h.flushMicrotasks();
+    audio.ended = true;
+    audio.paused = true;
+    audio.dispatchEvent({ type: 'ended' });
+    audio.currentTime = 0;
+    audio.ended = false;
+    audio.pause();
+    await h.runIntervals();
+    assert.equal(states.at(-1).state, 'ended');
+    audio.playImplementation = null;
+    await audio.play();
+    await h.flushMicrotasks();
+    assert.equal(states.at(-1).state, 'playing');
+});
+
+test('a new cached selection can replace a completed native owner after its ended flag is reset', async () => {
+    const h = createContentScriptHarness();
+    const states = listenToPlayback(h);
+    selectReadAloud(h, 'first');
+    const first = h.createAudio('blob:first');
+    await first.play();
+    await h.flushMicrotasks();
+    first.ended = true;
+    first.paused = true;
+    first.dispatchEvent({ type: 'ended' });
+    first.ended = false;
+    first.currentTime = 0;
+    first.pause();
+    selectReadAloud(h, 'next');
+    const next = h.createAudio('blob:next');
+    await next.play();
+    await h.flushMicrotasks();
+    assert.equal(states.at(-1).responseId, 'next');
+    assert.equal(states.at(-1).state, 'playing');
+});
+
 test('rejected automatic play reports the browser restriction without waiting for a timeout', async () => {
     const h = createContentScriptHarness();
     const states = listenToPlayback(h);

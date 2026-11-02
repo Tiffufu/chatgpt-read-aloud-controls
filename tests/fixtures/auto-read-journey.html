@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Auto Read Aloud journey checks</title>
+<style>
+body{font:16px system-ui;max-width:960px;margin:36px auto;padding:0 16px;background:#fafaf8;color:#222}
+button{font:inherit;padding:8px 12px}.pass{color:#067647}.fail{color:#b42318}li{margin:10px 0}
+iframe{width:100%;height:600px;border:1px solid #aaa}pre{white-space:pre-wrap;font-size:12px}
+</style>
+<h1>Auto Read Aloud journey checks</h1>
+<p>Production adapter, queue, player, and real silent WAV playback. Six scenarios combine 40, 400, and 2,400-word responses with 3-, 30-, or 180-second media and short or long histories. Each checks a paused queue, completion, native cleanup, and a newly generated successor.</p>
+<button id="run">Run six journey checks</button>
+<p id="summary" role="status">Ready</p><ol id="results"></ol><pre id="failure"></pre><div id="preview"></div>
+<script>
+const assert=(value,message)=>{if(!value)throw new Error(message);};
+const settle=()=>new Promise(resolve=>setTimeout(resolve,0));
+async function until(predicate){const deadline=Date.now()+8000;while(!predicate()){if(Date.now()>deadline)throw new Error('Timed out waiting for expected queue/playback transition');await new Promise(resolve=>setTimeout(resolve,20));}}
+document.getElementById('run').onclick=async()=>{
+ const run=document.getElementById('run');run.disabled=true;document.getElementById('results').replaceChildren();document.getElementById('failure').textContent='';let passed=0;
+ for(const history of [0,120])for(const words of [40,400,2400]){
+  const frame=document.createElement('iframe');const trace=[];let doc;
+  const seconds=words===40?3:words===400?30:180;
+  const name=`${words} words, ${seconds}s audio, ${history} earlier responses${history?', earlier user nodes removed':''}`;
+  try{
+   const loaded=new Promise((resolve,reject)=>{const timeout=setTimeout(()=>reject(new Error('Scenario iframe did not load within 8 seconds')),8000);frame.onload=()=>{clearTimeout(timeout);resolve();};frame.onerror=()=>{clearTimeout(timeout);reject(new Error('Scenario iframe failed to load'));};});
+   frame.src=`reading-queue-preview.html?ae-words=${words}&ae-audio-seconds=${seconds}&ae-history=${history}&ae-reset-ended=1&ae-unmount-previous=${history?1:0}`;
+   document.getElementById('preview').replaceChildren(frame);await loaded;doc=frame.contentDocument;const win=frame.contentWindow;
+   let queue;doc.addEventListener('ae-read-aloud-player:queue',event=>{queue=event.detail;trace.push({event:'queue',state:queue.state,current:queue.current?.id,waiting:queue.items.map(item=>item.id),error:queue.error});});
+   win.addEventListener('error',event=>trace.push({event:'error',message:event.message}));
+   const incoming=()=>doc.getElementById('incoming').click();
+   incoming();await until(()=>queue?.state==='playing'&&queue.current);const first=queue.current.id;
+   assert(doc.querySelector(`[data-message-id="${first}"] .markdown`).textContent.split(/\s+/).length===words,'response length did not match scenario');
+   await until(()=>doc.querySelector('#ae_enhanced_player [aria-label="Pause"]:not(:disabled)'));
+   doc.querySelector('#ae_enhanced_player [aria-label="Pause"]').click();await until(()=>queue.state==='paused');
+   incoming();await until(()=>queue.items.length===1);const second=queue.items[0].id;
+   assert(queue.current.id===first,'new response interrupted paused playback');
+   doc.querySelector('#ae_enhanced_player [aria-label="Play"]').click();await until(()=>queue.state==='playing');
+   doc.getElementById('finish').click();await until(()=>queue.state==='playing'&&queue.current?.id===second);
+   doc.getElementById('finish').click();await until(()=>queue.state==='ended');
+   doc.dispatchEvent(new win.Event('visibilitychange'));await settle();await settle();
+   assert(queue.state==='ended','native cleanup changed completion into a paused blocker');
+   incoming();await until(()=>queue.state==='playing'&&queue.current?.id!==second);
+   assert(queue.items.length===0&&!queue.suspended&&!queue.error,'successor stalled after completion');
+   assert(doc.getElementById('ae_enhanced_player'),'playing successor has no player');
+   assert(!trace.some(entry=>entry.event==='error'||entry.error),'journey emitted an error');
+   passed++;const li=document.createElement('li');li.className='pass';li.textContent='PASS: '+name;document.getElementById('results').append(li);
+  }catch(error){
+   const li=document.createElement('li');li.className='fail';li.textContent='FAIL: '+name+' — '+error.message;document.getElementById('results').append(li);
+   document.getElementById('failure').textContent+=name+'\n'+JSON.stringify(trace.slice(-30),null,2)+'\n';
+  }finally{doc?.querySelector('[aria-label="Close player"]')?.click();frame.remove();}
+  document.getElementById('summary').textContent=`${passed}/6 passed`;
+ }
+ document.documentElement.dataset.testResult=passed===6?'passed':'failed';run.disabled=false;
+};
+</script>
+</html>

@@ -2,15 +2,16 @@
 
 ## Unreleased dictation-pause experiment
 
-Recorded November 1, 2026 after increasing automatic-resume rewind to six seconds, with compact settings help and background timing repairs:
+Recorded November 2, 2026 after adding durable generation acknowledgement and playback completion, with new project-chat admission coverage:
 
-- Full Node suite: **147/147 passed**.
+- Full Node suite: **151/151 passed**.
 - Production JavaScript syntax, manifest asset validation, and whitespace checks passed.
 - `tests/fixtures/media-startup.html`: **5/5 passed** in Chrome, including a play request that resolves 21 simulated seconds later, pause/resume six seconds earlier, and verification that audio unready at recording start remains untouched until a new recording starts.
-- `tests/fixtures/auto-read-runtime.html`: **29/29 passed** in Chrome, including delayed completion of an acknowledged submission without an intermediate generating state.
+- `tests/fixtures/auto-read-runtime.html`: **30/30 passed** in Chrome, including delayed completion and first-answer admission during project-chat URL assignment.
+- `tests/fixtures/auto-read-journey.html`: **6/6 passed** in Chrome. Scenarios use 40/400/2,400-word responses, 3/30/180-second silent WAV media, and 0/120 earlier responses. They check paused queueing, progression, native completion/reset, and another new response. The prior production code failed the native-cleanup checks in a negative-control run. Completion is accelerated by seeking near the end; this does not establish uninterrupted three-minute playback.
 - The local settings preview was inspected at its 300-pixel width with help closed and expanded. Click, Enter and Space toggle help; Escape closes it and restores focus. The checkbox remains off by default. Installed toolbar-popup sizing remains a manual check.
 
-A user trial of the earlier experimental version reported working button-based dictation pause/resume. A subsequent user trial confirmed that the three-second rewind works after reloading the updated extension but reported insufficient context. The six-second revision has Node and Chrome fixture coverage; its daily-use trial remains outstanding. Long unattended timeouts, other interface languages, remapped shortcuts with the installed feature, and packaged ZIP installation remain unverified. The latest timing repairs have deterministic regression and browser-fixture coverage; a live background/fullscreen retest remains outstanding. Earlier live dictation inspection established observable button, hotkey, cancellation, and transcription states; it did not validate this installed implementation.
+A user trial of the earlier experimental version reported working button-based dictation pause/resume. A subsequent user trial confirmed that the three-second rewind works after reloading the updated extension but reported insufficient context. The six-second revision has Node and Chrome fixture coverage; its daily-use trial remains outstanding. Long unattended timeouts, other interface languages, remapped shortcuts with the installed feature, and packaged ZIP installation remain unverified. The latest admission/completion repairs have deterministic regression and browser-fixture coverage. A live failure inspection found two recognized completed turns with the older player paused at zero and the next response absent from the queue; its original transitions were not captured. Live generation and background/fullscreen retests remain outstanding. Earlier live dictation inspection established observable button, hotkey, cancellation, and transcription states; it did not validate this installed implementation.
 
 The following release record is historical and does not establish compatibility for this experiment.
 

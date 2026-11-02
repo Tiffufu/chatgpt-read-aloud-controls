@@ -11,7 +11,8 @@ const originalFetch=window.fetch.bind(window);
 const previewAudio=new Set();const nativePlay=HTMLMediaElement.prototype.play;
 HTMLMediaElement.prototype.play=function(...args){previewAudio.add(this);return nativePlay.apply(this,args);};
 function silentWave(){
- const samples=8000*90;const bytes=new Uint8Array(44+samples*2);const view=new DataView(bytes.buffer);const label=(at,text)=>{for(let i=0;i<text.length;i++)bytes[at+i]=text.charCodeAt(i);};
+ const seconds=Math.min(600,Math.max(2,Number(new URLSearchParams(location.search).get('ae-audio-seconds'))||90));
+ const samples=8000*seconds;const bytes=new Uint8Array(44+samples*2);const view=new DataView(bytes.buffer);const label=(at,text)=>{for(let i=0;i<text.length;i++)bytes[at+i]=text.charCodeAt(i);};
  label(0,'RIFF');view.setUint32(4,bytes.length-8,true);label(8,'WAVE');label(12,'fmt ');view.setUint32(16,16,true);view.setUint16(20,1,true);view.setUint16(22,1,true);view.setUint32(24,8000,true);view.setUint32(28,16000,true);view.setUint16(32,2,true);view.setUint16(34,16,true);label(36,'data');view.setUint32(40,samples*2,true);return bytes;
 }
 window.fetch=(input,options)=>String(input).includes('/backend-api/synthesize')?Promise.resolve(new Response(silentWave(),{headers:{'content-type':'audio/wav'}})):originalFetch(input,options);
@@ -26,6 +27,11 @@ window.fetch=(input,options)=>String(input).includes('/backend-api/synthesize')?
 <script src="../../src/js/player-settings.js"></script><script src="../../src/js/aac-container.js"></script><script src="../../src/js/media-timeline.js"></script><script src="../../src/js/captured-playback.js"></script><script src="../../src/js/reading-queue.js"></script><script src="../../src/js/content-script.js"></script>
 <script>
 let pageAudio=null;let pageObjectUrl=null;let number=0;let theme='dark';
+const scenarioParams=new URLSearchParams(location.search);
+const resetEnded=scenarioParams.get('ae-reset-ended')==='1';
+const unmountPrevious=scenarioParams.get('ae-unmount-previous')==='1';
+const incomingWords=Math.min(2400,Math.max(20,Number(scenarioParams.get('ae-words'))||40));
+const historyCount=Math.min(120,Math.max(0,Number(scenarioParams.get('ae-history'))||0));
 const documentationPreview=new URLSearchParams(location.search).get('ae-docs')==='1';
 if(documentationPreview)document.title='A little time to read - ChatGPT';
 const examples=documentationPreview?[
@@ -50,19 +56,22 @@ function addResponse(text){
   if(pageObjectUrl)URL.revokeObjectURL(pageObjectUrl);
   document.querySelectorAll('[aria-pressed="true"]').forEach(node=>node.setAttribute('aria-pressed','false'));
   const next=document.createElement('audio');pageAudio=next;next.muted=true;pageObjectUrl=URL.createObjectURL(blob);next.src=pageObjectUrl;next.preload='auto';
-  next.addEventListener('ended',()=>read.setAttribute('aria-pressed','false'));
+  next.addEventListener('ended',()=>{read.setAttribute('aria-pressed','false');if(resetEnded){next.currentTime=0;next.pause();}});
   await next.play();read.setAttribute('aria-pressed','true');
  });
  article.append(label,body,read);document.getElementById('conversation').append(article);return read;
 }
 examples.forEach(addResponse);
+for(let i=0;i<historyCount;i++){const user=document.createElement('div');user.dataset.messageAuthorRole='user';user.dataset.messageId=`history-user-${i}`;user.hidden=true;user.textContent='Earlier sample prompt';document.getElementById('conversation').append(user);addResponse(`Earlier sample response ${i+1}.`);}
 document.getElementById('sample').onclick=()=>{
  const buttons=document.querySelectorAll('[aria-label="Read aloud"]');buttons[0].click();buttons[1].click();buttons[2].click();buttons[3].click();
 };
-document.getElementById('incoming').onclick=()=>{
+document.getElementById('incoming').onclick=async()=>{
  document.getElementById('prompt-textarea').value='A sample new prompt';document.querySelector('[aria-label="Send"]').click();
  const user=document.createElement('div');user.dataset.messageAuthorRole='user';user.dataset.messageId=`user-${number+1}`;user.hidden=true;user.textContent='Another sample prompt';document.getElementById('conversation').append(user);
- addResponse('Here is a new response, waiting its turn. It joins the end without interrupting what you are listening to.');
+ if(unmountPrevious){await new Promise(resolve=>setTimeout(resolve,0));document.querySelectorAll('[data-message-author-role="user"]').forEach(previous=>{if(previous!==user)previous.remove();});}
+ const words='Here is a new response waiting its turn without interrupting the current playback and keeping the queue moving in order.'.split(' ');
+ addResponse(Array.from({length:incomingWords},(_,i)=>words[i%words.length]).join(' '));
 };
 document.getElementById('finish').onclick=()=>{previewAudio.forEach(a=>{if(!a.paused&&Number.isFinite(a.duration))a.currentTime=Math.max(0,a.duration-.02);});};
 document.getElementById('theme').onclick=()=>{theme=theme==='dark'?'light':'dark';document.body.classList.toggle('light',theme==='light');document.getElementById('theme').textContent=theme==='dark'?'Light theme':'Dark theme';document.dispatchEvent(new CustomEvent('ae-read-aloud-player:settings',{detail:{settings:{theme,autoReadAloud:true}}}));};

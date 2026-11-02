@@ -72,6 +72,25 @@ test('an unacknowledged submit still expires without narrating later history', (
     assert.deepEqual(h.starts, []);
 });
 
+test('an acknowledged submission remains eligible when the earlier user turn is unmounted', () => {
+    const h = harness();
+    h.controller.beginGeneration();
+    h.scan([], { userKey: 'user-2', userKeys: ['user-1', 'user-2'] });
+    h.scan([turn('answer')], { userKey: 'user-2', userKeys: ['user-2'] });
+    assert.deepEqual(h.starts.map(item => item.id), ['answer']);
+});
+
+test('assigning a new project chat URL preserves an acknowledged complete-only first answer', () => {
+    const conversation = '/g/g-p-test/project';
+    const h = harness(snapshot([], { conversation, userKey: '', userKeys: [] }));
+    h.controller.beginGeneration();
+    h.scan([], { conversation, userKey: 'submitted-user', userKeys: ['submitted-user'] });
+    h.scan([turn('first-answer')], {
+        conversation: '/g/g-p-test/c/new-chat', userKey: 'submitted-user', userKeys: ['submitted-user']
+    });
+    assert.deepEqual(h.starts.map(item => item.id), ['first-answer']);
+});
+
 test('dictation pause is opt-in and accepts only a saved boolean', () => {
     const window = {};
     vm.runInNewContext(fs.readFileSync(path.join(root, 'src/js/player-settings.js'), 'utf8'), { window });
