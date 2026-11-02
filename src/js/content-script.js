@@ -9,6 +9,7 @@
     'use strict';
 
     const DICTATION_REWIND_SECONDS = 6;
+    const DICTATION_SEEK_TIMEOUT_MS = 2000;
 
     let audio = null;
     let controlsDiv = null;
@@ -1595,6 +1596,25 @@
         }
     };
 
+    const waitForDictationSeek = (owner) => new Promise((resolve, reject) => {
+        let timer;
+        const finish = (error) => {
+            owner.removeEventListener('seeked', settled);
+            owner.removeEventListener('error', failed);
+            owner.removeEventListener('emptied', failed);
+            clearTimeout(timer);
+            if (error) reject(error);
+            else resolve();
+        };
+        const settled = () => { if (!owner.seeking) finish(); };
+        const failed = () => finish(new Error('Dictation rewind did not settle.'));
+        owner.addEventListener('seeked', settled);
+        owner.addEventListener('error', failed);
+        owner.addEventListener('emptied', failed);
+        timer = setTimeout(failed, DICTATION_SEEK_TIMEOUT_MS);
+        settled();
+    });
+
     const finishDictationPause = async () => {
         const pending = dictationPause;
         cancelDictationPause();
@@ -1609,6 +1629,12 @@
             } catch (_error) {
                 // Regaining context is best effort; a failed seek must not block resume.
             }
+            if (pending.owner.seeking) await waitForDictationSeek(pending.owner);
+            // A manual action or a new recording may take over while seeking.
+            if (resume.revision !== dictationRevision || pending.session !== playerSession
+                || pending.owner !== playerSession.audioElement || !pending.owner.paused
+                || playerSession.isClosed || dictationState === 'recording'
+                || dictationInvalidated || !playerSettings.pauseWhileDictating) return;
             dictationResume = resume;
             let playing;
             try { playing = pending.owner.play(); }

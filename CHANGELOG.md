@@ -2,6 +2,8 @@
 
 ## Unreleased — dictation-pause experiment
 
+- Finish the dictation rewind before requesting playback, preventing a brief continuation at the old position. A stalled seek leaves manual resume available.
+
 - Keep acknowledged submissions eligible when earlier user nodes disappear, preserve the first answer during new project-chat URL assignment, and retain completion when native audio resets itself after ending. Add a full playback-journey fixture across response, audio, and history lengths.
 
 - Preserve acknowledged submissions when background rendering skips intermediate generation states, and retain player ownership for a timely native play request whose promise resolves after the association deadline.

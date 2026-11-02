@@ -14,8 +14,8 @@ async function until(fn){const end=Date.now()+5000;while(!fn()){if(Date.now()>en
 async function setup(delayFirstPlay=false){
  const frame=document.createElement('iframe');document.body.append(frame);const w=frame.contentWindow,d=frame.contentDocument;
  const nativeNow=w.Date.now.bind(w.Date);let clockOffset=0;w.Date.now=()=>nativeNow()+clockOffset;
- let releasePlay,playDelayed=false;const nativePlay=w.HTMLMediaElement.prototype.play;
- if(delayFirstPlay)w.HTMLMediaElement.prototype.play=function(){if(playDelayed)return nativePlay.call(this);playDelayed=true;const owner=this;return new Promise((resolve,reject)=>{releasePlay=()=>nativePlay.call(owner).then(resolve,reject);});};
+ let releasePlay,playDelayed=false;const playRequests=[];const nativePlay=w.HTMLMediaElement.prototype.play;
+ w.HTMLMediaElement.prototype.play=function(){playRequests.push({time:this.currentTime,seeking:this.seeking,rate:this.playbackRate});if(!delayFirstPlay||playDelayed)return nativePlay.call(this);playDelayed=true;const owner=this;return new Promise((resolve,reject)=>{releasePlay=()=>nativePlay.call(owner).then(resolve,reject);});};
  d.title='Media startup fixture';let finish;const response=()=>new w.Response(silentWave(),{headers:{'content-type':'audio/wav'}});
  const nativeFetch=w.fetch.bind(w);w.fetch=input=>String(input).includes('/backend-api/synthesize')?new Promise(resolve=>{finish=()=>resolve(response());}):nativeFetch(input);
  for(const file of ['player-settings','aac-container','media-timeline','captured-playback','reading-queue','content-script']){
@@ -23,16 +23,16 @@ async function setup(delayFirstPlay=false){
  }
  const link=d.createElement('link');link.rel='stylesheet';link.href=new URL('../../src/css/player.css',location.href);d.head.append(link);
  const states=[];d.addEventListener('ae-read-aloud-player:playback',e=>states.push(e.detail));
- return {w,d,states,frame,finish:()=>finish(),releasePlay:()=>releasePlay(),advanceClock:ms=>{clockOffset+=ms;},audio(){const a=d.createElement('audio');a.muted=true;a.src=w.URL.createObjectURL(new w.Blob([silentWave()],{type:'audio/wav'}));return a;},select(){d.dispatchEvent(new w.CustomEvent('ae-read-aloud-player:playback-intent',{detail:{responseId:'sample',requestId:null}}));},cleanup(a){d.querySelector('[aria-label="Close player"]')?.click();a.pause();w.URL.revokeObjectURL(a.src);frame.remove();}};
+ return {w,d,states,frame,playRequests,finish:()=>finish(),releasePlay:()=>releasePlay(),advanceClock:ms=>{clockOffset+=ms;},audio(){const a=d.createElement('audio');a.muted=true;a.src=w.URL.createObjectURL(new w.Blob([silentWave()],{type:'audio/wav'}));return a;},select(){d.dispatchEvent(new w.CustomEvent('ae-read-aloud-player:playback-intent',{detail:{responseId:'sample',requestId:null}}));},cleanup(a){d.querySelector('[aria-label="Close player"]')?.click();a.pause();w.URL.revokeObjectURL(a.src);frame.remove();}};
 }
 document.getElementById('run').onclick=async()=>{
  document.getElementById('run').disabled=true;const results=[];document.getElementById('results').replaceChildren();document.getElementById('summary').textContent='Running…';
- for(const mode of ['cached','early','dictation','dictation-loading','delayed-cached']){
+ for(const mode of ['cached','early','dictation','dictation-fast','dictation-loading','delayed-cached']){
   let t,a;
   try{
    t=await setup(mode==='delayed-cached');
    const dictation=state=>t.d.dispatchEvent(new t.w.CustomEvent('ae-read-aloud-player:dictation',{detail:{state,conversation:new URL(t.w.location.href).pathname.replace(/\/$/,'')||'/'}}));
-   if(mode.startsWith('dictation'))t.d.dispatchEvent(new t.w.CustomEvent('ae-read-aloud-player:settings',{detail:{settings:{pauseWhileDictating:true}}}));
+   if(mode.startsWith('dictation'))t.d.dispatchEvent(new t.w.CustomEvent('ae-read-aloud-player:settings',{detail:{settings:{pauseWhileDictating:true,playbackRate:mode==='dictation-fast'?2:1}}}));
    t.select();const request=(mode==='early'||mode==='dictation-loading')?t.w.fetch('/backend-api/synthesize'):null;
    a=t.audio();const play=a.play();if(mode==='delayed-cached'){t.advanceClock(21000);t.releasePlay();}await play;await until(()=>t.d.querySelector('#ae_enhanced_player'));const session=t.states.at(-1).sessionId;
    if(mode==='dictation-loading'){
@@ -52,17 +52,18 @@ document.getElementById('run').onclick=async()=>{
    if(request){t.finish();await request;}
    await until(()=>t.d.querySelector('[aria-label="Pause"]:not(:disabled)'));
    assert(t.states.at(-1).sessionId===session,'capture reset the playing session');
-   if(mode==='dictation'){
-    a.currentTime=8;dictation('recording');await until(()=>t.d.querySelector('[aria-label="Play"]'));
+   if(mode==='dictation'||mode==='dictation-fast'){
+    a.currentTime=12;dictation('recording');await until(()=>t.d.querySelector('[aria-label="Play"]'));
     assert(a.paused,'dictation did not pause page audio');
-    const pausedAt=Number(t.d.querySelector('.ae-current-time').textContent.split(':').at(-1));
-    assert(pausedAt>=8,'dictation lost the playback position');
+    const pausedAt=a.currentTime;
+    assert(pausedAt>=12,'dictation lost the playback position');
     dictation('transcribing');await until(()=>t.states.at(-1).state==='playing');
-    await until(()=>Number(t.d.querySelector('.ae-current-time').textContent.split(':').at(-1))<pausedAt-1);
-    const resumedAt=Number(t.d.querySelector('.ae-current-time').textContent.split(':').at(-1));
-    assert(Math.abs(resumedAt-(pausedAt-6))<=1,'dictation did not rewind six seconds');
+    const resumed=t.playRequests.at(-1);
+    assert(!resumed.seeking,'play was requested before rewind finished');
+    assert(Math.abs(resumed.time-(pausedAt-6))<0.1,'dictation did not rewind six seconds');
+    assert(resumed.rate===(mode==='dictation-fast'?2:1),'resume changed playback speed');
     assert(t.d.querySelector('.ae-dictation-status').style.display==='none','status remained after resume');
-    results.push({name:'dictation pauses and resumes production media six seconds earlier',pass:true});continue;
+    results.push({name:'dictation finishes its six-second rewind before resuming at '+(mode==='dictation-fast'?'2x':'1x'),pass:true});continue;
    }
    a.currentTime=3;t.d.querySelector('[aria-label="Pause"]').click();await until(()=>!!t.d.querySelector('[aria-label="Play"]'));
    t.d.querySelector('[aria-label="Play"]').click();await until(()=>t.states.at(-1).state==='playing');
