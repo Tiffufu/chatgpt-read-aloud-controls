@@ -60,9 +60,9 @@ document.getElementById('run').onclick=async()=>{
     dictation('transcribing');await until(()=>t.states.at(-1).state==='playing');
     await until(()=>Number(t.d.querySelector('.ae-current-time').textContent.split(':').at(-1))<pausedAt-1);
     const resumedAt=Number(t.d.querySelector('.ae-current-time').textContent.split(':').at(-1));
-    assert(Math.abs(resumedAt-(pausedAt-3))<=1,'dictation did not rewind three seconds');
+    assert(Math.abs(resumedAt-(pausedAt-6))<=1,'dictation did not rewind six seconds');
     assert(t.d.querySelector('.ae-dictation-status').style.display==='none','status remained after resume');
-    results.push({name:'dictation pauses and resumes production media three seconds earlier',pass:true});continue;
+    results.push({name:'dictation pauses and resumes production media six seconds earlier',pass:true});continue;
    }
    a.currentTime=3;t.d.querySelector('[aria-label="Pause"]').click();await until(()=>!!t.d.querySelector('[aria-label="Play"]'));
    t.d.querySelector('[aria-label="Play"]').click();await until(()=>t.states.at(-1).state==='playing');

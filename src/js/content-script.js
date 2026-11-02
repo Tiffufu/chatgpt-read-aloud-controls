@@ -8,7 +8,7 @@
 (function () {
     'use strict';
 
-    const DICTATION_REWIND_SECONDS = 3;
+    const DICTATION_REWIND_SECONDS = 6;
 
     let audio = null;
     let controlsDiv = null;

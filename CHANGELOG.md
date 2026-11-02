@@ -4,7 +4,7 @@
 
 - Preserve acknowledged submissions when background rendering skips intermediate generation states, and retain player ownership for a timely native play request whose promise resolves after the association deadline.
 
-- Rewind three seconds when automatically resuming after dictation, stopping at the beginning. Replace the persistent settings explanation with an information button and expandable help; keep save feedback visible only when needed.
+- Rewind six seconds when automatically resuming after dictation, stopping at the beginning. Replace the persistent settings explanation with an information button and expandable help; keep save feedback visible only when needed.
 - Add an off-by-default **Pause audio while dictating** setting for ChatGPT web dictation. Resume applies only to audio paused by the feature; manual transport and lifecycle changes cancel it.
 - Hold queued starts during recording and display paused and failed-resume feedback. Pause is attempted only when recording starts with resumable audio ready; otherwise playback stays untouched for that recording. Confirmed automatic recording ends follow the same resume behavior as manual ends.
 - Add session-race regression tests and real-browser dictation fixtures. Live installation, long timeout and daily-use validation remain required before release.

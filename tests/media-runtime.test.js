@@ -885,7 +885,7 @@ test('dictation pause is off by default and starts only on confirmed recording',
     assert.equal(page.paused, true);
 });
 
-test('dictation resumes only its paused owner three seconds earlier exactly once', async () => {
+test('dictation resumes only its paused owner six seconds earlier exactly once', async () => {
     const { h, page } = await dictationHarness();
     const competitor = h.createAudio('blob:competitor');
     dictationEvent(h, 'recording');
@@ -897,11 +897,11 @@ test('dictation resumes only its paused owner three seconds earlier exactly once
     dictationEvent(h, 'transcribing');
     await h.flushMicrotasks();
     assert.equal(captured.paused, false);
-    assert.equal(captured.currentTime, 27);
+    assert.equal(captured.currentTime, 24);
     assert.equal(competitor.playCalls, 0);
     dictationEvent(h, 'idle');
     assert.equal(captured.playCalls, 1);
-    assert.equal(captured.currentTime, 27);
+    assert.equal(captured.currentTime, 24);
 });
 
 test('dictation rewind stops at the beginning of audio', async () => {
