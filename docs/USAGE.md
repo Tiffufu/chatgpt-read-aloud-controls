@@ -81,7 +81,7 @@ Open the extension popup and check **Automatically read new responses aloud**.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/settings-dark.jpg">
-  <img src="../images/settings-light.jpg" alt="Extension popup showing skip, speed, theme, and automatic reading settings" width="300">
+  <img src="../images/settings-light.jpg" alt="Extension popup showing skip, speed, theme, automatic reading, and dictation pause settings" width="300">
 </picture>
 
 Newly completed responses join the tab’s queue. Opening, scrolling, or focusing an existing conversation does not read its history. Both manually selected and automatically added responses wait behind paused playback.

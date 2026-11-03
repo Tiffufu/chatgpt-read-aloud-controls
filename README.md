@@ -70,11 +70,11 @@ See the [usage guide](docs/USAGE.md) for queue controls, settings, downloads, an
 
 ## Settings
 
-Open the extension icon to set skip intervals, default speed, theme, and **Automatically read new responses aloud**. Automatic reading starts off; both skip intervals default to 15 seconds. Settings are saved locally and apply to active ChatGPT tabs.
+Open the extension icon to set skip intervals, default speed, theme, **Automatically read new responses aloud**, and **Pause audio while dictating**. Automatic reading and dictation pause start off; both skip intervals default to 15 seconds. Settings are saved locally and apply to active ChatGPT tabs.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/settings-dark.jpg">
-  <img src="images/settings-light.jpg" alt="Settings popup with independent skip intervals, default playback speed, theme, and automatic reading checkbox" width="300">
+  <img src="images/settings-light.jpg" alt="Settings popup with skip intervals, playback speed, theme, automatic reading, and dictation pause checkboxes" width="300">
 </picture>
 
 ## Privacy

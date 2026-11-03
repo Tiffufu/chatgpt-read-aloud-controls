@@ -5,6 +5,11 @@ Captured October 30, 2026 from the production extension UI at runtime commit
 composition of those captures with typography and a background; its controls and
 response text are the captured product UI.
 
+The light and dark settings captures were refreshed November 2, 2026 from the
+production popup at runtime commit `ea081c2`, including the optional dictation
+pause checkbox and its collapsed information button. Other captures remain from
+the original session above.
+
 ## Theme-aware presentation
 
 The README and usage guide use GitHub-supported `<picture>` elements. A dark
@@ -26,7 +31,7 @@ for review; production Markdown uses the reader's GitHub appearance.
 | `reading-queue` | Paused, drawer open, one current response and three waiting. | 592 × 513 |
 | `player-expanded` | Paused, drawer closed. | 592 × 197 |
 | `player-minimized` | Paused, minimized, same skip values. | 592 × 88 |
-| `settings` | Actual settings form with fresh-install defaults. | 300 × 395 |
+| `settings` | Actual settings form with fresh-install defaults and dictation pause help closed. | 300 × 402 |
 
 ## Capture sources
 
