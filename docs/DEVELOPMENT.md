@@ -132,8 +132,26 @@ Follow [images/README.md](../images/README.md) to refresh actual UI captures. Ke
    files are excluded. File order and ZIP timestamps are deterministic.
 5. Extract the ZIP into a temporary folder and check every manifest path. Use that
    folder for an unpacked-install smoke check in Chrome.
-6. Create a GitHub release tagged `v<version>` at the verified commit and attach
-   the ZIP. Keep the asset name stable so the README's latest-download link works.
+6. Copy the [release template](../.github/RELEASE_TEMPLATE.md) into the release
+   description and replace every placeholder. GitHub does not apply this file
+   automatically. Keep the numbered first-install instructions near the top,
+   the exact asset name and direct download link, the Source code archive
+   distinction, and separate manual-update instructions in every release,
+   including patches. Link the full installation guide and changelog at
+   `v<version>` so the instructions match the download. Describe user-facing
+   changes and report only verification actually completed, with any gaps.
+   Distinguish automated tests, browser fixtures, live ChatGPT checks, and the
+   separate installation check of the extracted ZIP.
+7. Create a draft GitHub release tagged `v<version>` at the verified commit and
+   attach the ZIP. Confirm the tag, manifest version, changelog, and packaged
+   manifest agree. Keep the asset name stable so the README's latest-download
+   link works. Before publishing, check the rendered instructions, links, and
+   attached asset; make sure no template placeholders remain. After publishing,
+   verify that the release's download and documentation links resolve.
 
 GitHub's automatic source archives contain the repository. The attached unpacked
 ZIP is the smaller installation download intended for extension users.
+
+For a release-note correction, update the description and verify its links.
+Documentation changes alone do not require a new version, a moved tag, or
+replacement of the published ZIP.
