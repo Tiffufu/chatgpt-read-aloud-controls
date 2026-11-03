@@ -10,7 +10,7 @@ new permissions, services, or dependencies.
 - Only a newly generated, completed assistant answer is eligible. Opening,
   hydrating, scrolling, or focusing an existing conversation is never a trigger.
 - A submit interaction or an observed native generation control establishes a
-  generation cycle. Per-message rendering transitions alone are not sufficient. An acknowledged new user turn keeps that cycle eligible if a delayed render skips intermediate generation states; the 15-second stale-submit guard applies only until acknowledgement. That acknowledgement remains valid if earlier user nodes are unmounted. Assigning a new project chat’s URL also preserves a cycle already correlated with the same submitted user turn.
+  generation cycle. Per-message rendering transitions alone are not sufficient. An acknowledged new user turn keeps that cycle eligible if a delayed render skips intermediate generation states; the 15-second stale-submit guard applies only until acknowledgement. That acknowledgement remains valid if earlier user nodes are unmounted. Assigning a new project chat’s URL also preserves a cycle already correlated with the same submitted user turn. When the URL arrives before or with the first user message, a matching in-memory prompt fingerprint permits admission within the same project. The fingerprint is neither persisted nor included in queue events. Unrecognized user-message markup leaves this fallback unavailable.
 - Eligible responses wait in completion order behind the tab's current playback,
   including manually started and paused playback.
 - With optional dictation pause enabled, new queued starts also wait while ChatGPT dictation is starting or recording. Admission and ordering are unchanged. See [dictation behavior](USAGE.md#pause-audio-while-dictating-experimental) for preparation and automatic-stop limitations.
@@ -32,8 +32,10 @@ new permissions, services, or dependencies.
 - Queue progression keeps the same player mounted. While the next response's audio
   element is being created, playback controls are temporarily disabled and show
   `Starting next response`; position and minimized/drawer state are preserved.
-- Navigation and reload discard pending work. Assigning the first conversation
-  URL to a new chat preserves its pending generation/start.
+- Navigation and reload discard pending work. Same-tab internal navigation links
+  and Back/Forward cancel pending generation before the next scan, including when
+  the destination contains an identical old prompt. Assigning the first conversation
+  URL automatically to a new chat preserves its pending generation/start.
 - An unavailable native control or missing playback confirmation suspends that
   tab's queue after 15 seconds. The drawer and popup show the failure; Retry
   restarts the pending response. Playback errors restore the interrupted response

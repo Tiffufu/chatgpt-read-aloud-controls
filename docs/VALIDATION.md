@@ -2,12 +2,12 @@
 
 ## Unreleased dictation-pause experiment
 
-Recorded November 2, 2026 after adding seek-completion gating to dictation resume, with durable generation acknowledgement and playback completion:
+Recorded November 2, 2026 after repairing first-message admission when a project chat URL arrives before or with its user message, in addition to seek-completion gating, durable generation acknowledgement, and playback completion:
 
-- Full Node suite: **154/154 passed**.
+- Full Node suite: **163/163 passed**. The two new admission regressions failed before the repair; all three user/URL orderings now start once, including an earlier generation control without a user message. Mismatched prompts, other projects, expired submissions, and cancelled submissions remain silent. Existing user-before-URL acknowledgement remains available when prompt text markup is unrecognized.
 - Production JavaScript syntax, manifest asset validation, and whitespace checks passed.
 - `tests/fixtures/media-startup.html`: **6/6 passed** in Chrome, including a play request that resolves 21 simulated seconds later, completion of the six-second rewind before Play at both 1× and 2×, and verification that audio unready at recording start remains untouched until a new recording starts.
-- `tests/fixtures/auto-read-runtime.html`: **30/30 passed** in Chrome, including delayed completion and first-answer admission during project-chat URL assignment.
+- `tests/fixtures/auto-read-runtime.html`: **36/36 passed** in Chrome, including first-answer admission with all three user/URL orderings and an earlier generation control, rejection of unrelated project history after Send, and cancellation on explicit link or Back/Forward navigation even when an old prompt is identical.
 - `tests/fixtures/auto-read-journey.html`: **6/6 passed** in Chrome. Scenarios use 40/400/2,400-word responses, 3/30/180-second silent WAV media, and 0/120 earlier responses. They check paused queueing, progression, native completion/reset, and another new response. The prior production code failed the native-cleanup checks in a negative-control run. Completion is accelerated by seeking near the end; this does not establish uninterrupted three-minute playback.
 - The local settings preview was inspected at its 300-pixel width with help closed and expanded. Click, Enter and Space toggle help; Escape closes it and restores focus. The checkbox remains off by default. Installed toolbar-popup sizing remains a manual check.
 

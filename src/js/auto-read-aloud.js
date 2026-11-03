@@ -58,6 +58,7 @@
         let generationCancelled = false;
         let regenerationId = null;
         let requestedUserKey = null;
+        let firstSubmission = null;
         let requestedAt = 0;
         let generationIds = new Set();
         let generationBaselineIds = new Set();
@@ -111,6 +112,7 @@
             generationOpen = Boolean(value.generating);
             generationCancelled = false;
             requestedUserKey = null;
+            firstSubmission = null;
             generationIds = new Set(value.generating ? value.turns.filter(turn => turn.state === 'generating').map(turn => turn.id) : []);
             generationBaselineIds = new Set(value.turns.map(turn => turn.id));
             if (value.generating) generationBaselineIds.delete(value.turns[value.turns.length - 1]?.id);
@@ -178,11 +180,21 @@
                 return;
             }
             if (current.conversation !== value.conversation) {
-                const assigned = !/\/c\//.test(current.conversation)
-                    && /\/c\//.test(value.conversation)
-                    && current.userKey === value.userKey
+                // The first URL may arrive before the submitted user node. Keep
+                // that empty handoff only within its project and submit window;
+                // admission still requires the matching prompt fingerprint.
+                const sameScope = current.conversation.replace(/\/project$/, '').replace(/\/$/, '')
+                    === value.conversation.split('/c/')[0];
+                const pendingFirst = generationOpen && firstSubmission && sameScope
+                    && Date.now() - requestedAt <= 15000
+                    && ((!value.userKey && !value.turns.length)
+                        || value.userSignature === firstSubmission.signature);
+                const correlated = current.userKey === value.userKey
                     && (value.turns.some(turn => generationIds.has(turn.id))
                         || (generationOpen && requestedUserKey === null && Boolean(current.userKey)));
+                const assigned = !/\/c\//.test(current.conversation)
+                    && /\/c\//.test(value.conversation)
+                    && (pendingFirst || correlated);
                 if (!assigned) {
                     clearQueue();
                     baseline(value);
@@ -199,15 +211,18 @@
                 generationCancelled = false;
                 requestedUserKey = null;
             }
-            const userSubmitted = requestedUserKey === null || (value.userKey !== requestedUserKey
-                && (!requestedUserKey || !value.userKeys || value.userKeys.includes(requestedUserKey)));
+            const userSubmitted = (!firstSubmission || (Boolean(value.userKey)
+                    && (value.conversation === firstSubmission.conversation || value.userSignature === firstSubmission.signature)))
+                && (requestedUserKey === null || (value.userKey !== requestedUserKey
+                    && (!requestedUserKey || !value.userKeys || value.userKeys.includes(requestedUserKey))));
             // Once acknowledged, older user nodes may be virtualized away.
-            if (requestedUserKey !== null && userSubmitted) requestedUserKey = null;
+            if (userSubmitted) { requestedUserKey = null; firstSubmission = null; }
             // A submitted turn can finish while background rendering skips the
             // generating state. Expire only a submit the page never acknowledged.
             if (requestedUserKey !== null && !userSubmitted && !value.generating && Date.now() - requestedAt > 15000) {
                 generationOpen = false;
                 requestedUserKey = null;
+                firstSubmission = null;
             }
             const canGenerate = enabled && generationOpen && userSubmitted;
             const latestId = value.turns[value.turns.length - 1]?.id;
@@ -345,17 +360,21 @@
             },
             retry() { suspended = false; onError(''); pump(); emit(); },
             dispose() { disposed = true; enabled = false; clearQueue(); emit(); },
-            beginGeneration(responseId = null) {
+            beginGeneration(responseId = null, promptSignature = null) {
                 generationBaselineIds = new Set(records.keys());
                 generationOpen = true;
                 generationCancelled = false;
                 regenerationId = responseId;
                 requestedUserKey = responseId ? null : current?.userKey ?? '';
+                firstSubmission = promptSignature && !responseId && current && !/\/c\//.test(current.conversation)
+                    && !current.userKey && !current.turns.length
+                    ? { signature: promptSignature, conversation: current.conversation } : null;
                 requestedAt = Date.now();
             },
             cancelGeneration() {
                 generationCancelled = true;
                 generationOpen = false;
+                firstSubmission = null;
                 records.forEach(record => { if (!record.handled) record.eligible = false; });
             },
             manualStart(responseId) {
@@ -434,6 +453,10 @@
             for (let i = 0; i < text.length; i++) result = Math.imul(result ^ text.charCodeAt(i), 16777619);
             return `${text.length}:${result >>> 0}`;
         };
+        const promptSignature = text => {
+            const normalized = String(text || '').replace(/\s+/g, ' ').trim();
+            return normalized ? hash(normalized) : null;
+        };
         const entries = () => {
             const seen = new Set();
             return Array.from(document.querySelectorAll(TURN)).filter(node => {
@@ -480,8 +503,11 @@
                 const turns = entries().map(describe);
                 const users = document.querySelectorAll('[data-message-author-role="user"], [data-turn-key]:has(button[aria-label="Edit message"])');
                 const lastUser = users[users.length - 1];
+                const userBody = lastUser?.matches('[data-message-author-role="user"]') ? lastUser
+                    : lastUser?.querySelector('[data-user-message-bubble] [dir="auto"]');
                 return {
                     conversation: conversation(), userKey: lastUser ? responseId(lastUser) : '',
+                    userSignature: promptSignature(userBody?.innerText || userBody?.textContent),
                     userKeys: Array.from(users, responseId),
                     generating: Boolean(document.querySelector(STOP)),
                     turns
@@ -531,6 +557,10 @@
             composerHasText() {
                 const composer = document.querySelector('#prompt-textarea, [contenteditable="true"][role="textbox"], textarea[placeholder]');
                 return Boolean((composer?.value || composer?.textContent || '').trim());
+            },
+            composerSignature() {
+                const composer = document.querySelector('#prompt-textarea, [contenteditable="true"][role="textbox"], textarea[placeholder]');
+                return promptSignature(composer?.value || composer?.innerText || composer?.textContent);
             }
         };
     }
@@ -668,6 +698,13 @@
         document.addEventListener('ae-read-aloud-player:settings', event => settings(event.detail?.settings));
         document.addEventListener('click', event => {
             if (automaticClick || !initialized || !contextAvailable()) return;
+            const link = event.target?.closest?.('a[href]');
+            if (link && !event.button && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey
+                && (!link.target || link.target === '_self') && !link.hasAttribute('download')) {
+                const destination = new URL(link.href, root.location.href);
+                const current = new URL(root.location.href);
+                if (destination.origin === current.origin && destination.pathname !== current.pathname) controller.cancelGeneration();
+            }
             const action = adapter.clickKind(event.target);
             if (action?.type === 'read' && action.button.getAttribute('aria-pressed') !== 'true') {
                 scan();
@@ -685,18 +722,18 @@
                     dispatch(INTENT_EVENT, { responseId: action.id, requestId: null });
                 }
             } else if (action?.type === 'cancel') controller.cancelGeneration();
-            else if (action?.type === 'generate' && (action.id || adapter.composerHasText())) controller.beginGeneration(action.id);
+            else if (action?.type === 'generate' && (action.id || adapter.composerHasText())) controller.beginGeneration(action.id, adapter.composerSignature());
         }, true);
         document.addEventListener('submit', event => {
             if (!contextAvailable()) return;
             if (adapter.composerHasText() && (adapter.isComposer(event.target) || event.target?.querySelector?.('#prompt-textarea, [contenteditable="true"][role="textbox"]'))) {
-                controller.beginGeneration();
+                controller.beginGeneration(null, adapter.composerSignature());
             }
         }, true);
         document.addEventListener('keydown', event => {
             if (!contextAvailable()) return;
             if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && adapter.isComposer(event.target) && adapter.composerHasText()) {
-                controller.beginGeneration();
+                controller.beginGeneration(null, adapter.composerSignature());
             }
         }, true);
         chrome.runtime?.onMessage?.addListener((message, _sender, respond) => {
@@ -726,7 +763,7 @@
                 subtree: true, childList: true, characterData: true, attributes: true,
                 attributeFilter: ['data-talvt-turn-state', 'data-is-streaming', 'aria-label', 'aria-pressed', 'aria-disabled', 'disabled']
             });
-            root.addEventListener('popstate', scheduleScan);
+            root.addEventListener('popstate', () => { controller.cancelGeneration(); scheduleScan(); });
             document.addEventListener('visibilitychange', scheduleScan);
             dispatch(SNAPSHOT_EVENT);
             // Handles SPA URL changes even when the conversation DOM has no mutation.

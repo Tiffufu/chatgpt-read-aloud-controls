@@ -2,6 +2,8 @@
 
 ## Unreleased — dictation-pause experiment
 
+- Preserve the first automatic response when a new project chat's URL arrives before or with its user message. Match an in-memory prompt fingerprint before admission so unrelated history stays silent.
+
 - Finish the dictation rewind before requesting playback, preventing a brief continuation at the old position. A stalled seek leaves manual resume available.
 
 - Keep acknowledged submissions eligible when earlier user nodes disappear, preserve the first answer during new project-chat URL assignment, and retain completion when native audio resets itself after ending. Add a full playback-journey fixture across response, audio, and history lengths.

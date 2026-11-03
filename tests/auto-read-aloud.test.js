@@ -91,6 +91,55 @@ test('assigning a new project chat URL preserves an acknowledged complete-only f
     assert.deepEqual(h.starts.map(item => item.id), ['first-answer']);
 });
 
+for (const timing of ['together', 'url-first', 'user-first']) {
+    test(`first project response starts once when URL and submitted user arrive ${timing}`, () => {
+        const conversation = '/g/g-p-test/project';
+        const h = harness(snapshot([], { conversation, userKey: '', userKeys: [] }));
+        h.controller.beginGeneration(null, 'submitted-prompt-fingerprint');
+        const user = { userKey: 'submitted-user', userKeys: ['submitted-user'], userSignature: 'submitted-prompt-fingerprint' };
+        if (timing === 'user-first') h.scan([], { conversation, ...user });
+        if (timing === 'url-first') h.scan([], { conversation: '/g/g-p-test/c/new', userKey: '', userKeys: [] });
+        const completed = { conversation: '/g/g-p-test/c/new', ...user };
+        h.scan([turn('first-answer')], completed);
+        h.scan([turn('first-answer')], completed);
+        assert.deepEqual(h.starts.map(item => item.id), ['first-answer']);
+    });
+}
+
+test('a user acknowledged before URL assignment does not require recognizable prompt markup', () => {
+    const h = harness(snapshot([], { conversation: '/g/g-p-test/project', userKey: '', userKeys: [] }));
+    h.controller.beginGeneration(null, 'submitted-prompt-fingerprint');
+    h.scan([], { conversation: '/g/g-p-test/project', userKey: 'submitted-user', userSignature: null });
+    h.scan([turn('first-answer')], { conversation: '/g/g-p-test/c/new', userKey: 'submitted-user', userSignature: null });
+    assert.deepEqual(h.starts.map(item => item.id), ['first-answer']);
+});
+
+test('a generation control without a user does not discard the pending first prompt match', () => {
+    const h = harness(snapshot([], { conversation: '/g/g-p-test/project', userKey: '', userKeys: [] }));
+    h.controller.beginGeneration(null, 'submitted-prompt-fingerprint');
+    h.scan([], { conversation: '/g/g-p-test/project', userKey: '', userKeys: [], generating: true });
+    h.scan([turn('first-answer')], { conversation: '/g/g-p-test/c/new', userKey: 'submitted-user',
+        userKeys: ['submitted-user'], userSignature: 'submitted-prompt-fingerprint' });
+    assert.deepEqual(h.starts.map(item => item.id), ['first-answer']);
+});
+
+for (const scenario of ['different-prompt', 'different-project', 'expired', 'cancelled']) {
+    test(`a pending first project submission cannot narrate history: ${scenario}`, (t) => {
+        let now = 1000;
+        t.mock.method(Date, 'now', () => now);
+        const h = harness(snapshot([], { conversation: '/g/g-p-test/project', userKey: '', userKeys: [] }));
+        h.controller.beginGeneration(null, 'submitted-prompt-fingerprint');
+        if (scenario === 'expired') now += 16000;
+        if (scenario === 'cancelled') h.controller.cancelGeneration();
+        h.scan([turn('historical')], {
+            conversation: scenario === 'different-project' ? '/g/g-p-other/c/history' : '/g/g-p-test/c/history',
+            userKey: 'old-user', userKeys: ['old-user'],
+            userSignature: scenario === 'different-prompt' ? 'old-prompt-fingerprint' : 'submitted-prompt-fingerprint'
+        });
+        assert.deepEqual(h.starts, []);
+    });
+}
+
 test('dictation pause is opt-in and accepts only a saved boolean', () => {
     const window = {};
     vm.runInNewContext(fs.readFileSync(path.join(root, 'src/js/player-settings.js'), 'utf8'), { window });
