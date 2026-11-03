@@ -13,6 +13,11 @@
 Select the extracted folder, rather than the ZIP or its `src` subfolder.
 Keep the folder in place while the extension is installed.
 
+Choose **chatgpt-read-aloud-controls-unpacked.zip** under **Assets** on the release
+page. GitHub's automatically generated **Source code** ZIP and TAR.GZ archives
+contain the development repository; the named unpacked ZIP is the installation
+download.
+
 ## Update
 
 Download and extract the latest release, then replace the extension files in

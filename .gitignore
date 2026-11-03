@@ -31,7 +31,7 @@ Temporary Items
 *.swo
 *~
 
-# Local implementation and design companion scratch files
+# Local design companion previews
 .superpowers/
 
 # Keep local planning/session notes out of the public tree

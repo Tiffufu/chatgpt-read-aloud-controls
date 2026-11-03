@@ -30,7 +30,7 @@ Version 0.4.0 adds optional **Pause audio while dictating** and automatic-readin
 
 1. Download the ZIP above, extract it, and move the `chatgpt-read-aloud-controls` folder to a permanent location.
 2. Open `chrome://extensions` in Chrome or another Chromium-based browser.
-3. Enable **Developer mode**, select **Load unpacked**, and choose the extracted repository folder containing `manifest.json`.
+3. Enable **Developer mode**, select **Load unpacked**, and choose the extracted `chatgpt-read-aloud-controls` folder containing `manifest.json`.
 4. Refresh open `chatgpt.com` tabs.
 5. Start **Read Aloud** on a ChatGPT response. The player appears automatically.
 
