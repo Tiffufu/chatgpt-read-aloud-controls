@@ -11,12 +11,13 @@ Listen to ChatGPT with a floating player and a reading queue you can manage. Pau
 
 This extension is independently maintained and is not affiliated with OpenAI.
 
-This branch includes an unreleased, optional **Pause audio while dictating** experiment. See [dictation behavior and limitations](docs/USAGE.md#pause-audio-while-dictating-experimental) before trying it. The latest release download below remains the stable version.
+Version 0.4.0 adds optional **Pause audio while dictating** and automatic-reading reliability fixes. Dictation pause starts off and remains experimental; see [behavior and limitations](docs/USAGE.md#pause-audio-while-dictating-experimental) before enabling it.
 
 ## What it does
 
 - **Manage your listening queue.** Select another response’s Read Aloud to add it without interrupting playback. Reorder by dragging or using arrows, remove entries, clear upcoming responses, and Undo a removal.
 - **Read new responses automatically.** An optional setting adds newly completed responses to the queue. Each tab has its own queue; opening old conversations does not start narration.
+- **Pause while dictating.** An optional setting pauses ready Read Aloud audio during ChatGPT dictation, then resumes six seconds earlier. Enable it in the extension settings.
 - **Control playback.** Play, pause, seek, and skip backward or forward with independently configurable intervals from 1–300 seconds.
 - **Choose your pace.** Use 0.75×, 1×, 1.25×, 1.5×, or 2× speed. Both time labels reflect listening time at the selected speed.
 - **Keep the player small.** Drag it out of the way or minimize it. The same playback controls stay available, and expanding restores the drawer’s previous state.

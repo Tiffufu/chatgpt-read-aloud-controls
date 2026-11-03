@@ -1,19 +1,33 @@
 # Changelog
 
-## Unreleased — dictation-pause experiment
+## 0.4.0 — November 2, 2026
 
-- Preserve the first automatic response when a new project chat's URL arrives before or with its user message. Match an in-memory prompt fingerprint before admission so unrelated history stays silent.
+### Added
 
-- Finish the dictation rewind before requesting playback, preventing a brief continuation at the old position. A stalled seek leaves manual resume available.
+- Optional, off-by-default **Pause audio while dictating** for ChatGPT web
+  dictation. Ready playback pauses when recording begins, then resumes six
+  seconds earlier after the rewind finishes. Manual transport and lifecycle
+  changes cancel automatic resume. Audio still loading when recording begins
+  stays untouched for that recording.
+- Hold queued starts during dictation. Add an information button for the
+  setting's behavior and limitations, plus refreshed light and dark screenshots.
 
-- Keep acknowledged submissions eligible when earlier user nodes disappear, preserve the first answer during new project-chat URL assignment, and retain completion when native audio resets itself after ending. Add a full playback-journey fixture across response, audio, and history lengths.
+### Fixed
 
-- Preserve acknowledged submissions when background rendering skips intermediate generation states, and retain player ownership for a timely native play request whose promise resolves after the association deadline.
+- Preserve first-response automatic reading across new project-chat URL and
+  user-message arrival orders, while rejecting unrelated history and explicit
+  navigation. Keep acknowledged submissions eligible when older user nodes
+  disappear or background rendering skips intermediate generation states.
+- Retain the player for timely playback requests that resolve late, and preserve
+  queue completion when native audio resets itself after ending.
+- Finish the automatic dictation rewind before Play, preventing a brief
+  continuation at the old position. A stalled seek leaves manual resume available.
 
-- Rewind six seconds when automatically resuming after dictation, stopping at the beginning. Replace the persistent settings explanation with an information button and expandable help; keep save feedback visible only when needed.
-- Add an off-by-default **Pause audio while dictating** setting for ChatGPT web dictation. Resume applies only to audio paused by the feature; manual transport and lifecycle changes cancel it.
-- Hold queued starts during recording and display paused and failed-resume feedback. Pause is attempted only when recording starts with resumable audio ready; otherwise playback stays untouched for that recording. Confirmed automatic recording ends follow the same resume behavior as manual ends.
-- Add session-race regression tests and real-browser dictation fixtures. Live installation, long timeout and daily-use validation remain required before release.
+### Maintenance
+
+- Expand admission, cancellation, and media race regression tests and browser
+  fixtures, including playback journeys across response, audio, and history
+  lengths. See [validation coverage and remaining manual checks](docs/VALIDATION.md).
 
 ## 0.3.1 — October 31, 2026
 

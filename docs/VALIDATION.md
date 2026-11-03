@@ -1,6 +1,6 @@
 # Validation summary
 
-## Unreleased dictation-pause experiment
+## v0.4.0 release verification
 
 Recorded November 2, 2026 after repairing first-message admission when a project chat URL arrives before or with its user message, in addition to seek-completion gating, durable generation acknowledgement, and playback completion:
 
@@ -13,7 +13,12 @@ Recorded November 2, 2026 after repairing first-message admission when a project
 
 A user trial of the earlier experimental version reported working button-based dictation pause/resume. A subsequent user trial confirmed that the three-second rewind works after reloading the updated extension but reported insufficient context. The six-second revision has Node and Chrome fixture coverage; its daily-use trial remains outstanding. Long unattended timeouts, other interface languages, remapped shortcuts with the installed feature, and packaged ZIP installation remain unverified. The latest admission/completion repairs have deterministic regression and browser-fixture coverage. A live failure inspection found two recognized completed turns with the older player paused at zero and the next response absent from the queue; its original transitions were not captured. Live generation and background/fullscreen retests remain outstanding. Earlier live dictation inspection established observable button, hotkey, cancellation, and transcription states; it did not validate this installed implementation.
 
-The following release record is historical and does not establish compatibility for this experiment.
+The release ZIP is checked for integrity, version, included manifest assets, and
+byte-for-byte agreement with the verified runtime sources. This archive check
+does not replace a fresh unpacked-install smoke check in Chrome. GitHub CI checks
+the release commit on Node 22 and 24.
+
+The following release record is historical and does not establish compatibility for v0.4.0.
 
 ## v0.3.1 release record
 
