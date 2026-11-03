@@ -14,6 +14,8 @@
     const QUEUE_EVENT = 'ae-read-aloud-player:queue';
     const QUEUE_REQUEST = 'ae-read-aloud-player:queue-request';
     const QUEUE_COMMAND = 'ae-read-aloud-player:queue-command';
+    const DICTATION_EVENT = 'ae-read-aloud-player:dictation';
+    const DICTATION_REQUEST = 'ae-read-aloud-player:dictation-request';
     const START_ERROR = 'Read Aloud could not start. Start it manually to continue the queue, or turn automatic reading off and on to reset it.';
     const RECOVER = ' Start Read Aloud manually to continue the queue.';
     const playbackError = reason => ({
@@ -56,6 +58,7 @@
         let generationCancelled = false;
         let regenerationId = null;
         let requestedUserKey = null;
+        let firstSubmission = null;
         let requestedAt = 0;
         let generationIds = new Set();
         let generationBaselineIds = new Set();
@@ -68,6 +71,7 @@
         let error = '';
         let lastPublished = '';
         let disposed = false;
+        let dictating = false;
 
         const busy = () => ['starting', 'playing', 'paused'].includes(playback.state);
         const serialize = item => ({
@@ -108,6 +112,7 @@
             generationOpen = Boolean(value.generating);
             generationCancelled = false;
             requestedUserKey = null;
+            firstSubmission = null;
             generationIds = new Set(value.generating ? value.turns.filter(turn => turn.state === 'generating').map(turn => turn.id) : []);
             generationBaselineIds = new Set(value.turns.map(turn => turn.id));
             if (value.generating) generationBaselineIds.delete(value.turns[value.turns.length - 1]?.id);
@@ -121,7 +126,7 @@
                 && record.state === 'complete' && record.hasText;
         };
         const tryStart = () => {
-            if (!attempt || attempt.clicked || disposed || suspended || busy()) return;
+            if (!attempt || attempt.clicked || disposed || suspended || dictating || busy()) return;
             if (!valid(attempt.item)) {
                 queue = queue.filter(item => item !== attempt.item);
                 clearAttempt();
@@ -143,7 +148,7 @@
             }
         };
         const pump = () => {
-            if (disposed || suspended || busy()) return;
+            if (disposed || suspended || dictating || busy()) return;
             if (attempt) { tryStart(); return; }
             while (queue.length && !valid(queue[0])) queue.shift();
             if (!queue.length) return;
@@ -175,10 +180,21 @@
                 return;
             }
             if (current.conversation !== value.conversation) {
+                // The first URL may arrive before the submitted user node. Keep
+                // that empty handoff only within its project and submit window;
+                // admission still requires the matching prompt fingerprint.
+                const sameScope = current.conversation.replace(/\/project$/, '').replace(/\/$/, '')
+                    === value.conversation.split('/c/')[0];
+                const pendingFirst = generationOpen && firstSubmission && sameScope
+                    && Date.now() - requestedAt <= 15000
+                    && ((!value.userKey && !value.turns.length)
+                        || value.userSignature === firstSubmission.signature);
+                const correlated = current.userKey === value.userKey
+                    && (value.turns.some(turn => generationIds.has(turn.id))
+                        || (generationOpen && requestedUserKey === null && Boolean(current.userKey)));
                 const assigned = !/\/c\//.test(current.conversation)
                     && /\/c\//.test(value.conversation)
-                    && current.userKey === value.userKey
-                    && value.turns.some(turn => generationIds.has(turn.id));
+                    && (pendingFirst || correlated);
                 if (!assigned) {
                     clearQueue();
                     baseline(value);
@@ -195,12 +211,19 @@
                 generationCancelled = false;
                 requestedUserKey = null;
             }
-            if (requestedUserKey !== null && !value.generating && Date.now() - requestedAt > 15000) {
+            const userSubmitted = (!firstSubmission || (Boolean(value.userKey)
+                    && (value.conversation === firstSubmission.conversation || value.userSignature === firstSubmission.signature)))
+                && (requestedUserKey === null || (value.userKey !== requestedUserKey
+                    && (!requestedUserKey || !value.userKeys || value.userKeys.includes(requestedUserKey))));
+            // Once acknowledged, older user nodes may be virtualized away.
+            if (userSubmitted) { requestedUserKey = null; firstSubmission = null; }
+            // A submitted turn can finish while background rendering skips the
+            // generating state. Expire only a submit the page never acknowledged.
+            if (requestedUserKey !== null && !userSubmitted && !value.generating && Date.now() - requestedAt > 15000) {
                 generationOpen = false;
                 requestedUserKey = null;
+                firstSubmission = null;
             }
-            const userSubmitted = requestedUserKey === null || (value.userKey !== requestedUserKey
-                && (!requestedUserKey || !value.userKeys || value.userKeys.includes(requestedUserKey)));
             const canGenerate = enabled && generationOpen && userSubmitted;
             const latestId = value.turns[value.turns.length - 1]?.id;
             const nextRecords = new Map();
@@ -327,19 +350,31 @@
                 });
                 edit();
             },
+            setDictating(value) {
+                dictating = value === true;
+                // A native click deferred to a microtask has not started a
+                // session yet. Keep its item, cancel its click and timeout.
+                if (dictating && attempt && !busy()) clearAttempt(true);
+                if (!dictating) pump();
+                emit();
+            },
             retry() { suspended = false; onError(''); pump(); emit(); },
             dispose() { disposed = true; enabled = false; clearQueue(); emit(); },
-            beginGeneration(responseId = null) {
+            beginGeneration(responseId = null, promptSignature = null) {
                 generationBaselineIds = new Set(records.keys());
                 generationOpen = true;
                 generationCancelled = false;
                 regenerationId = responseId;
                 requestedUserKey = responseId ? null : current?.userKey ?? '';
+                firstSubmission = promptSignature && !responseId && current && !/\/c\//.test(current.conversation)
+                    && !current.userKey && !current.turns.length
+                    ? { signature: promptSignature, conversation: current.conversation } : null;
                 requestedAt = Date.now();
             },
             cancelGeneration() {
                 generationCancelled = true;
                 generationOpen = false;
+                firstSubmission = null;
                 records.forEach(record => { if (!record.handled) record.eligible = false; });
             },
             manualStart(responseId) {
@@ -418,6 +453,10 @@
             for (let i = 0; i < text.length; i++) result = Math.imul(result ^ text.charCodeAt(i), 16777619);
             return `${text.length}:${result >>> 0}`;
         };
+        const promptSignature = text => {
+            const normalized = String(text || '').replace(/\s+/g, ' ').trim();
+            return normalized ? hash(normalized) : null;
+        };
         const entries = () => {
             const seen = new Set();
             return Array.from(document.querySelectorAll(TURN)).filter(node => {
@@ -451,12 +490,24 @@
         };
         const conversation = () => new URL(location.href).pathname.replace(/\/$/, '') || '/';
         return {
+            dictationState() {
+                if (document.querySelector('button[aria-label="Cancel transcription"]')) return 'transcribing';
+                const stop = document.querySelector('button[aria-label="Stop dictation"]');
+                if (stop && !stop.disabled && stop.getAttribute('aria-disabled') !== 'true'
+                    && document.querySelector('button[aria-label="Cancel dictation"]')) return 'recording';
+                if (document.querySelector('button[aria-label="Starting dictation; click to cancel"]')) return 'starting';
+                if (document.querySelector('button[aria-label="Dictate"]')) return 'idle';
+                return 'unknown';
+            },
             snapshot() {
                 const turns = entries().map(describe);
                 const users = document.querySelectorAll('[data-message-author-role="user"], [data-turn-key]:has(button[aria-label="Edit message"])');
                 const lastUser = users[users.length - 1];
+                const userBody = lastUser?.matches('[data-message-author-role="user"]') ? lastUser
+                    : lastUser?.querySelector('[data-user-message-bubble] [dir="auto"]');
                 return {
                     conversation: conversation(), userKey: lastUser ? responseId(lastUser) : '',
+                    userSignature: promptSignature(userBody?.innerText || userBody?.textContent),
                     userKeys: Array.from(users, responseId),
                     generating: Boolean(document.querySelector(STOP)),
                     turns
@@ -506,6 +557,10 @@
             composerHasText() {
                 const composer = document.querySelector('#prompt-textarea, [contenteditable="true"][role="textbox"], textarea[placeholder]');
                 return Boolean((composer?.value || composer?.textContent || '').trim());
+            },
+            composerSignature() {
+                const composer = document.querySelector('#prompt-textarea, [contenteditable="true"][role="textbox"], textarea[placeholder]');
+                return promptSignature(composer?.value || composer?.innerText || composer?.textContent);
             }
         };
     }
@@ -518,6 +573,9 @@
         let automaticClick = false;
         let scheduledNativeStart = null;
         let enabled = false;
+        let pauseWhileDictating = false;
+        let dictationHeld = false;
+        let lastDictation = '';
         let initialized = false;
         let scanScheduled = false;
         let settingsRevision = 0;
@@ -547,6 +605,8 @@
                 // button. Let the intercepted user click finish first.
                 root.queueMicrotask(() => {
                     if (scheduledNativeStart !== pending || !contextAvailable()) return;
+                    publishDictation();
+                    if (scheduledNativeStart !== pending || dictationHeld) return;
                     scheduledNativeStart = null;
                     const latest = adapter.find(item.id);
                     if (!latest?.read || latest.read.disabled || latest.signature !== item.signature
@@ -566,6 +626,7 @@
             if (disposed) return;
             disposed = true;
             enabled = false;
+            dispatch(DICTATION_EVENT, { state: 'unknown', conversation: null });
             controller.dispose();
             observer?.disconnect();
             if (scanInterval !== null) root.clearInterval?.(scanInterval);
@@ -575,7 +636,28 @@
             if (chrome.runtime && !chrome.runtime.id) { invalidate(); return false; }
             return true;
         };
-        const scan = () => { if (initialized && contextAvailable()) controller.scan(adapter.snapshot()); };
+        const publishDictation = (force = false) => {
+            const state = adapter.dictationState();
+            const conversation = new URL(root.location.href).pathname.replace(/\/$/, '') || '/';
+            const key = `${conversation}:${state}`;
+            const held = pauseWhileDictating && (state === 'recording' || state === 'starting'
+                || (state === 'unknown' && dictationHeld));
+            // Deliver the end transition to the player before releasing any
+            // queued start, so its existing paused owner remains authoritative.
+            if (force || key !== lastDictation) {
+                lastDictation = key;
+                dispatch(DICTATION_EVENT, { state, conversation });
+            }
+            if (held !== dictationHeld) {
+                dictationHeld = held;
+                controller.setDictating(held);
+            }
+        };
+        const scan = () => {
+            if (!initialized || !contextAvailable()) return;
+            publishDictation();
+            controller.scan(adapter.snapshot());
+        };
         const scheduleScan = () => {
             if (scanScheduled) return;
             scanScheduled = true;
@@ -585,9 +667,14 @@
             if (!contextAvailable()) return;
             settingsRevision += 1;
             enabled = value?.autoReadAloud === true;
+            pauseWhileDictating = value?.pauseWhileDictating === true;
+            if (initialized) publishDictation();
             if (initialized) controller.setEnabled(enabled, adapter.snapshot());
         };
         document.addEventListener('ae-read-aloud-player:extension-invalidated', invalidate);
+        document.addEventListener(DICTATION_REQUEST, () => {
+            if (initialized && contextAvailable()) publishDictation(true);
+        });
         document.addEventListener(PLAYBACK_EVENT, event => { if (!disposed) controller.playback(event.detail); });
         document.addEventListener(QUEUE_REQUEST, () => { if (!disposed) controller.publish(); });
         document.addEventListener(QUEUE_COMMAND, event => {
@@ -611,6 +698,13 @@
         document.addEventListener('ae-read-aloud-player:settings', event => settings(event.detail?.settings));
         document.addEventListener('click', event => {
             if (automaticClick || !initialized || !contextAvailable()) return;
+            const link = event.target?.closest?.('a[href]');
+            if (link && !event.button && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey
+                && (!link.target || link.target === '_self') && !link.hasAttribute('download')) {
+                const destination = new URL(link.href, root.location.href);
+                const current = new URL(root.location.href);
+                if (destination.origin === current.origin && destination.pathname !== current.pathname) controller.cancelGeneration();
+            }
             const action = adapter.clickKind(event.target);
             if (action?.type === 'read' && action.button.getAttribute('aria-pressed') !== 'true') {
                 scan();
@@ -628,18 +722,18 @@
                     dispatch(INTENT_EVENT, { responseId: action.id, requestId: null });
                 }
             } else if (action?.type === 'cancel') controller.cancelGeneration();
-            else if (action?.type === 'generate' && (action.id || adapter.composerHasText())) controller.beginGeneration(action.id);
+            else if (action?.type === 'generate' && (action.id || adapter.composerHasText())) controller.beginGeneration(action.id, adapter.composerSignature());
         }, true);
         document.addEventListener('submit', event => {
             if (!contextAvailable()) return;
             if (adapter.composerHasText() && (adapter.isComposer(event.target) || event.target?.querySelector?.('#prompt-textarea, [contenteditable="true"][role="textbox"]'))) {
-                controller.beginGeneration();
+                controller.beginGeneration(null, adapter.composerSignature());
             }
         }, true);
         document.addEventListener('keydown', event => {
             if (!contextAvailable()) return;
             if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && adapter.isComposer(event.target) && adapter.composerHasText()) {
-                controller.beginGeneration();
+                controller.beginGeneration(null, adapter.composerSignature());
             }
         }, true);
         chrome.runtime?.onMessage?.addListener((message, _sender, respond) => {
@@ -657,6 +751,7 @@
             } catch (_error) { /* Remain off if storage is unavailable. */ }
             if (!contextAvailable()) return;
             initialized = true;
+            publishDictation();
             controller.setEnabled(enabled, adapter.snapshot());
             observer = new root.MutationObserver(mutations => {
                 if (mutations.some(mutation => {
@@ -666,9 +761,9 @@
             });
             observer.observe(document.body, {
                 subtree: true, childList: true, characterData: true, attributes: true,
-                attributeFilter: ['data-talvt-turn-state', 'data-is-streaming', 'aria-label', 'aria-pressed', 'disabled']
+                attributeFilter: ['data-talvt-turn-state', 'data-is-streaming', 'aria-label', 'aria-pressed', 'aria-disabled', 'disabled']
             });
-            root.addEventListener('popstate', scheduleScan);
+            root.addEventListener('popstate', () => { controller.cancelGeneration(); scheduleScan(); });
             document.addEventListener('visibilitychange', scheduleScan);
             dispatch(SNAPSHOT_EVENT);
             // Handles SPA URL changes even when the conversation DOM has no mutation.

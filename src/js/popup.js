@@ -26,7 +26,23 @@
     const playbackRateSelect = document.getElementById('playbackRate');
     const themeSelect = document.getElementById('theme');
     const autoReadCheckbox = document.getElementById('autoReadAloud');
+    const dictationCheckbox = document.getElementById('pauseWhileDictating');
+    const dictationHelpButton = document.getElementById('dictationHelpButton');
+    const dictationHelp = document.getElementById('dictationHelp');
     const status = document.getElementById('status');
+
+    dictationHelpButton.addEventListener('click', () => {
+        dictationHelp.hidden = !dictationHelp.hidden;
+        dictationHelpButton.setAttribute('aria-expanded', String(!dictationHelp.hidden));
+    });
+    document.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape' || dictationHelp.hidden) return;
+        event.preventDefault();
+        event.stopPropagation();
+        dictationHelp.hidden = true;
+        dictationHelpButton.setAttribute('aria-expanded', 'false');
+        dictationHelpButton.focus();
+    });
 
     if (!settingsApi) {
         status.textContent = SETTINGS_MODULE_ERROR;
@@ -59,7 +75,7 @@
         status.textContent = message;
         window.clearTimeout(statusTimer);
         statusTimer = window.setTimeout(() => {
-            status.textContent = 'Changes apply to active ChatGPT tabs.';
+            status.textContent = '';
         }, 1800);
     };
 
@@ -78,6 +94,7 @@
         playbackRateSelect.value = String(settings.playbackRate);
         themeSelect.value = settings.theme;
         autoReadCheckbox.checked = settings.autoReadAloud;
+        dictationCheckbox.checked = settings.pauseWhileDictating;
     };
 
     const readForm = () => normalizeSettings({
@@ -85,7 +102,8 @@
         skipForwardSeconds: skipForwardInput.value,
         playbackRate: playbackRateSelect.value,
         theme: themeSelect.value,
-        autoReadAloud: autoReadCheckbox.checked
+        autoReadAloud: autoReadCheckbox.checked,
+        pauseWhileDictating: dictationCheckbox.checked
     });
 
     const persist = async () => {
@@ -112,7 +130,7 @@
         }
 
         render();
-        status.textContent = 'Changes apply to active ChatGPT tabs.';
+        status.textContent = '';
 
         form.addEventListener('submit', (event) => {
             event.preventDefault();
@@ -127,6 +145,7 @@
         playbackRateSelect.addEventListener('change', persist);
         themeSelect.addEventListener('change', persist);
         autoReadCheckbox.addEventListener('change', persist);
+        dictationCheckbox.addEventListener('change', persist);
 
         // The error belongs to the current tab, rather than the global preference.
         if (chromeApi?.tabs?.query && chromeApi?.tabs?.sendMessage) {

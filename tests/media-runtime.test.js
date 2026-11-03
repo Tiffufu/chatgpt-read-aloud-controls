@@ -856,6 +856,405 @@ const createContentScriptHarness = ({
     };
 };
 
+const dictationEvent = (h, state, conversation = '/c/test') => h.context.document.dispatchEvent(
+    new h.context.CustomEvent('ae-read-aloud-player:dictation', { detail: { state, conversation } })
+);
+const dictationSetting = (h, enabled = true) => h.context.document.dispatchEvent(
+    new h.context.CustomEvent('ae-read-aloud-player:settings', { detail: { settings: { pauseWhileDictating: enabled } } })
+);
+async function dictationHarness(options = {}) {
+    const h = createContentScriptHarness(options);
+    dictationSetting(h);
+    await h.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    const page = h.createAudio('blob:page-read-aloud', { currentTime: 30, seekable: [[0, 420]] });
+    await page.play();
+    await h.flushMicrotasks();
+    return { h, page };
+}
+
+test('dictation pause is off by default and starts only on confirmed recording', async () => {
+    const { h, page } = await dictationHarness();
+    dictationSetting(h, false);
+    dictationEvent(h, 'recording');
+    assert.equal(page.paused, false);
+    dictationEvent(h, 'idle');
+    dictationSetting(h);
+    dictationEvent(h, 'starting');
+    assert.equal(page.paused, false);
+    dictationEvent(h, 'recording');
+    assert.equal(page.paused, true);
+});
+
+test('dictation resumes only its paused owner six seconds earlier exactly once', async () => {
+    const { h, page } = await dictationHarness();
+    const competitor = h.createAudio('blob:competitor');
+    dictationEvent(h, 'recording');
+    const captured = h.capturedAudioElements[0];
+    assert.equal(page.paused, true);
+    assert.equal(captured.paused, true);
+    assert.equal(captured.currentTime, 30);
+    assert.ok(h.findPlayerElement(e => e.textContent === 'Paused for dictation'));
+    dictationEvent(h, 'transcribing');
+    await h.flushMicrotasks();
+    assert.equal(captured.paused, false);
+    assert.equal(captured.currentTime, 24);
+    assert.equal(competitor.playCalls, 0);
+    dictationEvent(h, 'idle');
+    assert.equal(captured.playCalls, 1);
+    assert.equal(captured.currentTime, 24);
+});
+
+test('dictation rewind stops at the beginning of audio', async () => {
+    const { h, page } = await dictationHarness();
+    page.currentTime = 1;
+    dictationEvent(h, 'recording');
+    dictationEvent(h, 'idle');
+    await h.flushMicrotasks();
+    const captured = h.capturedAudioElements[0];
+    assert.equal(captured.currentTime, 0);
+    assert.equal(captured.paused, false);
+});
+
+test('dictation stays paused until its asynchronous rewind finishes', async () => {
+    const { h } = await dictationHarness();
+    dictationEvent(h, 'recording');
+    const captured = h.capturedAudioElements[0];
+    let position = captured.currentTime;
+    Object.defineProperty(captured, 'currentTime', {
+        get: () => position,
+        set: value => { position = value; captured.seeking = true; }
+    });
+    dictationEvent(h, 'idle');
+    await h.flushMicrotasks();
+    assert.equal(captured.currentTime, 24);
+    assert.equal(captured.paused, true);
+    assert.equal(captured.playCalls, 0);
+    captured.seeking = false;
+    captured.dispatchEvent({ type: 'seeked' });
+    await h.flushMicrotasks();
+    assert.equal(captured.paused, false);
+    assert.equal(captured.playCalls, 1);
+});
+
+test('a dictation seek that never settles stays paused with manual-play feedback', async () => {
+    const { h } = await dictationHarness();
+    dictationEvent(h, 'recording');
+    const captured = h.capturedAudioElements[0];
+    Object.defineProperty(captured, 'currentTime', {
+        get: () => 24,
+        set: () => { captured.seeking = true; }
+    });
+    let timeout;
+    h.context.setTimeout = callback => { timeout = callback; return 1; };
+    h.context.clearTimeout = () => {};
+    dictationEvent(h, 'idle');
+    await h.flushMicrotasks();
+    assert.equal(captured.playCalls, 0);
+    assert.equal(typeof timeout, 'function');
+    timeout();
+    await h.flushMicrotasks();
+    assert.equal(captured.paused, true);
+    assert.equal(captured.listeners.get('seeked')?.size || 0, 0);
+    assert.ok(h.findPlayerElement(e => e.textContent === 'Resume unavailable. Press Play to continue.'));
+});
+
+test('a completed dictation seek cannot resume after cancellation or interfere with a manual play', async () => {
+    for (const cancel of [
+        h => dictationSetting(h, false),
+        h => dictationEvent(h, 'recording'),
+        h => dictationEvent(h, 'idle', '/c/other'),
+        h => h.findButton('Close player').click(),
+        h => h.context.document.dispatchEvent(new h.context.CustomEvent('ae-read-aloud-player:extension-invalidated')),
+        h => h.context.fetch('https://chatgpt.com/backend-api/synthesize?message_id=replacement'),
+        h => h.findButton('Play').click()
+    ]) {
+        const { h } = await dictationHarness();
+        dictationEvent(h, 'recording');
+        const captured = h.capturedAudioElements[0];
+        Object.defineProperty(captured, 'currentTime', {
+            get: () => 24,
+            set: () => { captured.seeking = true; }
+        });
+        dictationEvent(h, 'idle');
+        await h.flushMicrotasks();
+        assert.equal(captured.playCalls, 0);
+        await cancel(h);
+        await h.flushMicrotasks();
+        const calls = captured.playCalls;
+        const paused = captured.paused;
+        captured.seeking = false;
+        captured.dispatchEvent({ type: 'seeked' });
+        await h.flushMicrotasks();
+        assert.equal(captured.playCalls, calls);
+        assert.equal(captured.paused, paused);
+    }
+});
+
+test('a failed dictation rewind still resumes from the paused position', async () => {
+    const { h } = await dictationHarness();
+    dictationEvent(h, 'recording');
+    const captured = h.capturedAudioElements[0];
+    let attempted = false;
+    Object.defineProperty(captured, 'currentTime', {
+        get: () => 30,
+        set: () => { attempted = true; throw new Error('seek unavailable'); }
+    });
+    dictationEvent(h, 'idle');
+    await h.flushMicrotasks();
+    assert.equal(attempted, true);
+    assert.equal(captured.paused, false);
+    assert.equal(captured.currentTime, 30);
+});
+
+test('manual resume after dictation takeover does not rewind', async () => {
+    const { h } = await dictationHarness();
+    dictationEvent(h, 'recording');
+    const captured = h.capturedAudioElements[0];
+    h.findButton('Play').click();
+    await h.flushMicrotasks();
+    dictationEvent(h, 'idle');
+    await h.flushMicrotasks();
+    assert.equal(captured.currentTime, 30);
+    assert.equal(captured.playCalls, 1);
+});
+
+test('dictation leaves unready audio untouched for the entire recording session', async () => {
+    const { h, page } = await dictationHarness({ capturedPlaybackMode: 'loading' });
+    dictationEvent(h, 'recording');
+    assert.equal(page.paused, false);
+    assert.equal(h.findPlayerElement(e => e.textContent === 'Preparing to pause…'), null);
+    await h.makeCapturedReady();
+    await h.runIntervals();
+    dictationEvent(h, 'recording');
+    assert.equal(page.paused, false);
+    dictationEvent(h, 'idle');
+    await h.flushMicrotasks();
+    assert.equal(h.capturedAudioElements[0].playCalls, 0);
+    dictationEvent(h, 'recording');
+    assert.equal(page.paused, true);
+    dictationEvent(h, 'idle');
+    await h.flushMicrotasks();
+    assert.equal(h.capturedAudioElements[0].paused, false);
+});
+
+test('enabling the setting or recovering unknown markup cannot pause an ongoing recording late', async () => {
+    const { h, page } = await dictationHarness({ capturedPlaybackMode: 'loading' });
+    dictationEvent(h, 'recording');
+    dictationEvent(h, 'unknown');
+    await h.makeCapturedReady();
+    dictationEvent(h, 'recording');
+    assert.equal(page.paused, false);
+    dictationEvent(h, 'idle');
+    dictationSetting(h, false);
+    dictationEvent(h, 'recording');
+    dictationSetting(h, true);
+    dictationEvent(h, 'recording');
+    assert.equal(page.paused, false);
+    dictationEvent(h, 'idle');
+    dictationEvent(h, 'recording');
+    assert.equal(page.paused, true);
+});
+
+test('already-paused playback and manual takeover never gain dictation auto-resume', async () => {
+    const { h } = await dictationHarness();
+    h.findButton('Pause').click();
+    dictationEvent(h, 'recording');
+    dictationEvent(h, 'idle');
+    await h.flushMicrotasks();
+    assert.equal(h.capturedAudioElements[0].playCalls, 0);
+
+    h.findButton('Play').click();
+    await h.flushMicrotasks();
+    dictationEvent(h, 'recording');
+    h.findButton('Play').click();
+    await h.flushMicrotasks();
+    h.findButton('Pause').click();
+    const calls = h.capturedAudioElements[0].playCalls;
+    dictationEvent(h, 'idle');
+    await h.flushMicrotasks();
+    assert.equal(h.capturedAudioElements[0].playCalls, calls);
+    assert.equal(h.capturedAudioElements[0].paused, true);
+});
+
+test('disable invalidation unknown and navigation revoke dictation auto-resume', async () => {
+    for (const cancel of [
+        h => dictationSetting(h, false),
+        h => h.context.document.dispatchEvent(new h.context.CustomEvent('ae-read-aloud-player:extension-invalidated')),
+        h => dictationEvent(h, 'unknown'),
+        h => dictationEvent(h, 'idle', '/c/elsewhere')
+    ]) {
+        const { h } = await dictationHarness();
+        dictationEvent(h, 'recording');
+        cancel(h);
+        dictationEvent(h, 'idle');
+        await h.flushMicrotasks();
+        assert.equal(h.capturedAudioElements[0].playCalls, 0);
+    }
+});
+
+test('closed or replaced sessions cannot be resumed by an old dictation end', async () => {
+    const { h } = await dictationHarness();
+    dictationEvent(h, 'recording');
+    const captured = h.capturedAudioElements[0];
+    h.findButton('Close player').click();
+    dictationEvent(h, 'idle');
+    await h.flushMicrotasks();
+    assert.equal(captured.playCalls, 0);
+    assert.equal(h.context.document.getElementById('ae_enhanced_player'), null);
+
+    const second = await dictationHarness();
+    dictationEvent(second.h, 'recording');
+    await second.h.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    dictationEvent(second.h, 'idle');
+    await second.h.flushMicrotasks();
+    assert.equal(second.h.capturedAudioElements[0].playCalls, 0);
+    assert.equal(second.h.capturedAudioElements[1].playCalls, 0);
+});
+
+test('failed automatic resume leaves visible manual-play feedback', async () => {
+    const { h } = await dictationHarness();
+    dictationEvent(h, 'recording');
+    h.capturedAudioElements[0].playImplementation = () => Promise.reject(new Error('blocked'));
+    dictationEvent(h, 'transcribing');
+    await h.flushMicrotasks();
+    assert.equal(h.capturedAudioElements[0].paused, true);
+    assert.ok(h.findPlayerElement(e => e.textContent === 'Resume unavailable. Press Play to continue.'));
+    assert.ok(h.findButton('Play'));
+});
+
+test('transcription completion preserves an automatic resume still awaiting play', async () => {
+    const { h } = await dictationHarness();
+    dictationEvent(h, 'recording');
+    const captured = h.capturedAudioElements[0];
+    let finish;
+    captured.playImplementation = () => new Promise(resolve => {
+        finish = () => { captured.paused = false; resolve(); };
+    });
+    dictationEvent(h, 'transcribing');
+    dictationEvent(h, 'idle');
+    finish();
+    await h.flushMicrotasks();
+    assert.equal(captured.paused, false);
+});
+
+test('failed resume feedback survives normal transcription completion until manual Play', async () => {
+    const { h } = await dictationHarness();
+    dictationEvent(h, 'recording');
+    const captured = h.capturedAudioElements[0];
+    captured.playImplementation = () => Promise.reject(new Error('blocked'));
+    dictationEvent(h, 'transcribing');
+    await h.flushMicrotasks();
+    dictationEvent(h, 'idle');
+    assert.ok(h.findPlayerElement(e => e.textContent === 'Resume unavailable. Press Play to continue.'));
+    captured.playImplementation = function () { this.paused = false; return Promise.resolve(); };
+    h.findButton('Play').click();
+    await h.flushMicrotasks();
+    assert.equal(captured.paused, false);
+    assert.equal(h.findPlayerElement(e => e.textContent === 'Resume unavailable. Press Play to continue.'), null);
+});
+
+test('a revoked automatic resume rejection cannot suspend the reading queue', async () => {
+    const { h } = await dictationHarness();
+    const states = listenToPlayback(h);
+    dictationEvent(h, 'recording');
+    let reject;
+    h.capturedAudioElements[0].playImplementation = () => new Promise((_resolve, fail) => { reject = fail; });
+    dictationEvent(h, 'transcribing');
+    dictationEvent(h, 'recording');
+    reject(new Error('interrupted resume'));
+    await h.flushMicrotasks();
+    assert.equal(states.some(state => state.state === 'error'), false);
+    assert.equal(h.findPlayerElement(e => e.textContent === 'Resume unavailable. Press Play to continue.'), null);
+});
+
+test('capture failure leaves audio and dictation feedback untouched when recording begins', async () => {
+    const h = createContentScriptHarness({ responseFor: (_url, response) => ({
+        ...response,
+        clone: () => ({ ...response, arrayBuffer: async () => { throw new Error('capture failed'); } })
+    }) });
+    h.context.console = { ...console, error() {} };
+    dictationSetting(h);
+    await h.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    const page = h.createAudio('blob:capture-failed', { currentTime: 3, seekable: [[0, 420]] });
+    await page.play();
+    await h.flushMicrotasks();
+    dictationEvent(h, 'recording');
+    assert.equal(page.paused, false);
+    assert.equal(h.findPlayerElement(e => e.className === 'ae-dictation-status').textContent, '');
+});
+
+test('a delayed dictation resume is revoked by navigation disable close or renewed recording', async () => {
+    for (const cancel of [
+        h => dictationEvent(h, 'idle', '/c/other'),
+        h => dictationSetting(h, false),
+        h => h.findButton('Close player').click(),
+        h => dictationEvent(h, 'recording')
+    ]) {
+        const { h } = await dictationHarness();
+        dictationEvent(h, 'recording');
+        const captured = h.capturedAudioElements[0];
+        let finish;
+        captured.playImplementation = () => new Promise(resolve => {
+            finish = () => { captured.paused = false; resolve(); };
+        });
+        dictationEvent(h, 'idle');
+        cancel(h);
+        finish();
+        await h.flushMicrotasks();
+        assert.equal(captured.paused, true);
+    }
+});
+
+test('an older dictation resume cannot pause a newer manual play on the same owner', async () => {
+    const { h } = await dictationHarness();
+    dictationEvent(h, 'recording');
+    const captured = h.capturedAudioElements[0];
+    let finish;
+    captured.playImplementation = () => new Promise(resolve => {
+        finish = () => { captured.paused = false; resolve(); };
+    });
+    dictationEvent(h, 'idle');
+    captured.playImplementation = function () { this.paused = false; return Promise.resolve(); };
+    h.findButton('Play').click();
+    await h.flushMicrotasks();
+    finish();
+    await h.flushMicrotasks();
+    assert.equal(captured.paused, false);
+});
+
+test('dictation cannot pause an unready Read Aloud request when its response arrives later', async () => {
+    let finish;
+    const gate = new Promise(resolve => { finish = resolve; });
+    const h = createContentScriptHarness({ beforeFetch: () => gate });
+    dictationSetting(h);
+    selectReadAloud(h);
+    const request = h.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    dictationEvent(h, 'recording');
+    finish();
+    await request;
+    const page = h.createAudio('blob:late-read-aloud', { currentTime: 3, seekable: [[0, 420]] });
+    await page.play();
+    await h.flushMicrotasks();
+    assert.equal(page.paused, false);
+    dictationEvent(h, 'idle');
+    await h.flushMicrotasks();
+    assert.equal(h.capturedAudioElements[0].playCalls, 0);
+});
+
+test('manual skip or seek after dictation pause keeps playback paused when recording ends', async () => {
+    for (const action of [
+        h => h.findButton('Skip forward 15 seconds').click(),
+        h => { const seek = h.findPlayerElement(e => e.tagName === 'INPUT'); seek.value = '500'; seek.oninput(); }
+    ]) {
+        const { h } = await dictationHarness();
+        dictationEvent(h, 'recording');
+        action(h);
+        dictationEvent(h, 'idle');
+        await h.flushMicrotasks();
+        assert.equal(h.capturedAudioElements[0].playCalls, 0);
+    }
+});
+
 test('pause stays disabled and announces preparation until captured playback is seek ready', async () => {
     const harness = createContentScriptHarness({ capturedPlaybackMode: 'loading' });
     await harness.context.fetch('https://chatgpt.com/backend-api/synthesize');
@@ -1676,6 +2075,49 @@ test('playback lifecycle reports native start and completion even in a hidden ta
     assert.equal(states.at(-1).sessionId, 1);
 });
 
+test('native cleanup after completion cannot turn an ended response back into a paused queue blocker', async () => {
+    const h = createContentScriptHarness();
+    const states = listenToPlayback(h);
+    selectReadAloud(h, 'answer', 'auto-answer');
+    await h.context.fetch('https://chatgpt.com/backend-api/synthesize');
+    const audio = h.createAudio('blob:native-answer');
+    await audio.play();
+    await h.flushMicrotasks();
+    audio.ended = true;
+    audio.paused = true;
+    audio.dispatchEvent({ type: 'ended' });
+    audio.currentTime = 0;
+    audio.ended = false;
+    audio.pause();
+    await h.runIntervals();
+    assert.equal(states.at(-1).state, 'ended');
+    audio.playImplementation = null;
+    await audio.play();
+    await h.flushMicrotasks();
+    assert.equal(states.at(-1).state, 'playing');
+});
+
+test('a new cached selection can replace a completed native owner after its ended flag is reset', async () => {
+    const h = createContentScriptHarness();
+    const states = listenToPlayback(h);
+    selectReadAloud(h, 'first');
+    const first = h.createAudio('blob:first');
+    await first.play();
+    await h.flushMicrotasks();
+    first.ended = true;
+    first.paused = true;
+    first.dispatchEvent({ type: 'ended' });
+    first.ended = false;
+    first.currentTime = 0;
+    first.pause();
+    selectReadAloud(h, 'next');
+    const next = h.createAudio('blob:next');
+    await next.play();
+    await h.flushMicrotasks();
+    assert.equal(states.at(-1).responseId, 'next');
+    assert.equal(states.at(-1).state, 'playing');
+});
+
 test('rejected automatic play reports the browser restriction without waiting for a timeout', async () => {
     const h = createContentScriptHarness();
     const states = listenToPlayback(h);
@@ -1872,6 +2314,27 @@ test('expired read intent cannot claim later blob audio', async () => {
     await h.createAudio('blob:unrelated-later').play();
     await h.runIntervals();
     assert.equal(h.context.document.getElementById('ae_enhanced_player'), null);
+});
+
+test('a selected play requested on time retains its player when background playback resolves after the association window', async () => {
+    let now = 1000;
+    const h = createContentScriptHarness({ now: () => now });
+    const states = listenToPlayback(h);
+    h.context.document.visibilityState = 'hidden';
+    selectReadAloud(h, 'delayed-answer', 'auto-delayed');
+    const audio = h.createAudio('blob:delayed-answer');
+    let finish;
+    audio.playImplementation = () => new Promise(resolve => {
+        finish = () => { audio.paused = false; resolve(); };
+    });
+    const play = audio.play();
+    now += 21000;
+    finish();
+    await play;
+    await h.flushMicrotasks();
+    assert.equal(audio.paused, false);
+    assert.ok(h.context.document.getElementById('ae_enhanced_player'));
+    assert.ok(states.some(value => value.state === 'playing' && value.requestId === 'auto-delayed'));
 });
 
 test('cancelled read intent prevents cached audio from starting', async () => {

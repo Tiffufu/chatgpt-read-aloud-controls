@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.4.0 — November 2, 2026
+
+### Added
+
+- Optional, off-by-default **Pause audio while dictating** for ChatGPT web
+  dictation. Ready playback pauses when recording begins, then resumes six
+  seconds earlier after the rewind finishes. Manual transport and lifecycle
+  changes cancel automatic resume. Audio still loading when recording begins
+  stays untouched for that recording.
+- Hold queued starts during dictation. Add an information button for the
+  setting's behavior and limitations, plus refreshed light and dark screenshots.
+
+### Fixed
+
+- Preserve first-response automatic reading across new project-chat URL and
+  user-message arrival orders, while rejecting unrelated history and explicit
+  navigation. Keep acknowledged submissions eligible when older user nodes
+  disappear or background rendering skips intermediate generation states.
+- Retain the player for timely playback requests that resolve late, and preserve
+  queue completion when native audio resets itself after ending.
+- Finish the automatic dictation rewind before Play, preventing a brief
+  continuation at the old position. A stalled seek leaves manual resume available.
+
+### Maintenance
+
+- Expand admission, cancellation, and media race regression tests and browser
+  fixtures, including playback journeys across response, audio, and history
+  lengths. See [validation coverage and remaining manual checks](docs/VALIDATION.md).
+
 ## 0.3.1 — October 31, 2026
 
 ### Fixed

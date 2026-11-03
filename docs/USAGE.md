@@ -20,7 +20,21 @@ Start **Read Aloud** on a completed ChatGPT response. The floating player appear
 | Collapse / expand | Hide or show the timeline and drawer. |
 | Close | Pause the current audio, close the player, and clear this tab’s queue. |
 
-The player briefly disables Pause while preparing a resumable copy of the response. On the first enabled Pause, it transfers playback to that copy at the current position. ChatGPT’s own Read Aloud indicator can appear idle afterward; continue using the floating player.
+The player disables Pause while preparing a resumable copy of the response. Preparation waits for the complete audio download; the wait depends on the response and connection. On the first enabled Pause, it transfers playback to that copy at the current position. ChatGPT’s own Read Aloud indicator can appear idle afterward; continue using the floating player.
+
+## Pause audio while dictating (experimental)
+
+In the extension settings, check **Pause audio while dictating** to pause Read Aloud when ChatGPT web dictation begins recording. It is off by default and works independently of automatic reading. The extension observes ChatGPT’s dictation controls, so changing ChatGPT’s dictation shortcut does not require changing this setting. Dictation provided by another application is outside its scope.
+
+- When audio is ready, recording pauses the current response and displays **Paused for dictation**. Stopping dictation with its button or shortcut, or cancelling recording, resumes the same response six seconds before the paused position to help restore context. Rewind stops at the beginning and completes before playback resumes. If the rewind request is rejected immediately, playback resumes from the paused position; if a seek starts but does not finish, the player stays paused with manual-resume feedback. Manual Play/Pause does not apply this rewind.
+- Automatic pause is attempted only when recording begins and resumable playback is already ready. If audio is still loading or unavailable, playback is left alone for that entire recording, even if audio becomes ready later. There is no waiting message or delayed automatic pause. A subsequent recording can pause audio that is ready by then.
+- Audio that was already paused is left paused. Using Play/Pause, skipping, or seeking takes over playback and cancels automatic resume. Changing speed or minimizing the player does not cancel it.
+- Closing the player, changing responses or conversations, turning the setting off, or invalidating the extension cancels automatic resume. Press Play yourself if you still want to continue a paused response.
+- New queued responses wait while recording starts or is active. If the dictation controls become unrecognizable during recording, queued starts remain held until the controls return or the setting is turned off. Existing paused audio remains paused.
+- A confirmed end of recording resumes eligible audio, including an automatic stop that produces the same controls as a manual stop. The experiment does not distinguish timeout causes. Transcription completion is not required for resume; audio can resume while ChatGPT shows **Transcribing**.
+- If the browser rejects automatic resume, the player stays paused and displays **Resume unavailable. Press Play to continue.**
+
+Detection currently recognizes the observed English ChatGPT controls. Changed markup, another interface language, microphone failures, and long unattended timeouts need further live testing. No completion chime is included.
 
 ## Build and manage a queue
 
@@ -67,7 +81,7 @@ Open the extension popup and check **Automatically read new responses aloud**.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/settings-dark.jpg">
-  <img src="../images/settings-light.jpg" alt="Extension popup showing skip, speed, theme, and automatic reading settings" width="300">
+  <img src="../images/settings-light.jpg" alt="Extension popup showing skip, speed, theme, automatic reading, and dictation pause settings" width="300">
 </picture>
 
 Newly completed responses join the tab’s queue. Opening, scrolling, or focusing an existing conversation does not read its history. Both manually selected and automatically added responses wait behind paused playback.

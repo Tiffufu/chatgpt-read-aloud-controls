@@ -11,10 +11,13 @@ Listen to ChatGPT with a floating player and a reading queue you can manage. Pau
 
 This extension is independently maintained and is not affiliated with OpenAI.
 
+Version 0.4.0 adds optional **Pause audio while dictating** and automatic-reading reliability fixes. Dictation pause starts off and remains experimental; see [behavior and limitations](docs/USAGE.md#pause-audio-while-dictating-experimental) before enabling it.
+
 ## What it does
 
 - **Manage your listening queue.** Select another response’s Read Aloud to add it without interrupting playback. Reorder by dragging or using arrows, remove entries, clear upcoming responses, and Undo a removal.
 - **Read new responses automatically.** An optional setting adds newly completed responses to the queue. Each tab has its own queue; opening old conversations does not start narration.
+- **Pause while dictating.** An optional setting pauses ready Read Aloud audio during ChatGPT dictation, then resumes six seconds earlier. Enable it in the extension settings.
 - **Control playback.** Play, pause, seek, and skip backward or forward with independently configurable intervals from 1–300 seconds.
 - **Choose your pace.** Use 0.75×, 1×, 1.25×, 1.5×, or 2× speed. Both time labels reflect listening time at the selected speed.
 - **Keep the player small.** Drag it out of the way or minimize it. The same playback controls stay available, and expanding restores the drawer’s previous state.
@@ -68,11 +71,11 @@ See the [usage guide](docs/USAGE.md) for queue controls, settings, downloads, an
 
 ## Settings
 
-Open the extension icon to set skip intervals, default speed, theme, and **Automatically read new responses aloud**. Automatic reading starts off; both skip intervals default to 15 seconds. Settings are saved locally and apply to active ChatGPT tabs.
+Open the extension icon to set skip intervals, default speed, theme, **Automatically read new responses aloud**, and **Pause audio while dictating**. Automatic reading and dictation pause start off; both skip intervals default to 15 seconds. Settings are saved locally and apply to active ChatGPT tabs.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/settings-dark.jpg">
-  <img src="images/settings-light.jpg" alt="Settings popup with independent skip intervals, default playback speed, theme, and automatic reading checkbox" width="300">
+  <img src="images/settings-light.jpg" alt="Settings popup with skip intervals, playback speed, theme, automatic reading, and dictation pause checkboxes" width="300">
 </picture>
 
 ## Privacy

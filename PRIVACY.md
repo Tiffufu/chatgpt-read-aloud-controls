@@ -1,6 +1,6 @@
 # Privacy
 
-Last updated October 30, 2026.
+Last updated November 2, 2026.
 
 This statement describes Read Aloud Controls for ChatGPT. ChatGPT and your browser
 have their own data handling practices.
@@ -14,17 +14,22 @@ media and captures a copy of the current audio response in page memory for
 playback controls and download.
 
 Audio is generated and served by ChatGPT through its native Read Aloud feature.
+The optional dictation-pause setting reads the state of ChatGPT’s rendered dictation controls. It does not access the microphone, recorded speech, or transcription requests.
 The extension has no developer-operated server, analytics, advertising integration,
 or separate destination for uploading conversation text or audio.
 
 ## What it stores
 
-- **Settings:** skip intervals, playback speed, theme, and the automatic-reading
+- **Settings:** skip intervals, playback speed, theme, automatic reading, and dictation pause
   preference are saved in `chrome.storage.local` under `ae_player_settings`.
 - **Queue:** response identifiers, revision/signature values, short excerpts, and
   Undo state stay in memory separately in each tab. Pending entries are cleared
   when you close the player, leave the conversation, reload the tab, or invalidate
   the extension. The queue is not saved as listening history.
+- **New-chat submission:** a prompt fingerprint stays in tab memory while matching
+  the first submitted message across its initial URL assignment. It is not saved
+  to storage or sent in queue events, and is discarded on acknowledgement,
+  cancellation, expiry, navigation reset, or tab teardown.
 - **Current audio:** captured audio and the extension-owned playback copy remain
   in memory while needed. Closing the player or replacing the response releases
   the extension-owned captured playback resources and object URLs.
@@ -43,6 +48,7 @@ dictation remains a ChatGPT/browser feature.
 You can disable automatic reading in the popup, close the player to clear the
 queue, and remove downloaded files through your operating system. Settings can
 be cleared through the extension's local storage or by removing the extension.
+Dictation pause can be turned off separately. Its recording state and pause/resume ownership stay in memory in the current tab.
 
 When reporting a problem, share the relevant error and reproduction steps while
 omitting private conversation content. See [usage and troubleshooting](https://github.com/Tiffufu/chatgpt-read-aloud-controls/blob/main/docs/USAGE.md).

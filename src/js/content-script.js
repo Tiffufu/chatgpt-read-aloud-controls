@@ -8,6 +8,9 @@
 (function () {
     'use strict';
 
+    const DICTATION_REWIND_SECONDS = 6;
+    const DICTATION_SEEK_TIMEOUT_MS = 2000;
+
     let audio = null;
     let controlsDiv = null;
     let titleBarDiv = null;
@@ -36,6 +39,15 @@
     let uiSyncIntervalId = null;
     let audioTrackingInstalled = false;
     let isPlayerDismissed = false;
+    let dictationStatusLabel = null;
+    let dictationState = 'unknown';
+    let dictationRecordingSeen = false;
+    let dictationConversation = null;
+    let dictationPause = null;
+    let dictationNotice = '';
+    let dictationInvalidated = false;
+    let dictationRevision = 0;
+    let dictationResume = null;
 
     const createSettingsApiFallback = () => {
         const playbackRateOptions = Object.freeze([0.75, 1, 1.25, 1.5, 2]);
@@ -49,7 +61,8 @@
             skipForwardSeconds: 15,
             playbackRate: 1,
             theme: theme.SYSTEM,
-            autoReadAloud: false
+            autoReadAloud: false,
+            pauseWhileDictating: false
         });
         const minSkipSeconds = 1;
         const maxSkipSeconds = 300;
@@ -93,7 +106,8 @@
                     settings.playbackRate ?? settings.playbackSpeed ?? settings.defaultPlaybackRate
                 ),
                 theme: normalizeTheme(settings.theme),
-                autoReadAloud: settings.autoReadAloud === true
+                autoReadAloud: settings.autoReadAloud === true,
+                pauseWhileDictating: settings.pauseWhileDictating === true
             })
         });
     };
@@ -213,7 +227,8 @@
         captureStarted: false,
         responseId: null,
         requestId: null,
-        completedAt: 0
+        completedAt: 0,
+        playbackEnded: false
     });
 
     let playerSession = createPlayerSession();
@@ -241,6 +256,7 @@
         const currentAudio = playerSession.audioElement;
         const sourceUnavailable = currentAudio && !hasElementSource(currentAudio);
         const resolved = state || (playerSession.isClosed || playerSession.id === 0 ? 'closed'
+            : playerSession.playbackEnded ? 'ended'
             : sourceUnavailable ? 'error'
             : currentAudio?.ended ? 'ended'
                 : currentAudio ? (currentAudio.paused ? 'paused' : 'playing') : 'starting');
@@ -265,6 +281,11 @@
         ['playing', 'play', 'pause', 'ended', 'error'].forEach(name => {
             element.addEventListener?.(name, () => {
                 if (playerSession.isClosed || element !== playerSession.audioElement) return;
+                if (name === 'ended') playerSession.playbackEnded = true;
+                else if (name === 'play' || name === 'playing') playerSession.playbackEnded = false;
+                if (dictationPause?.state === 'paused' && ['play', 'playing', 'ended', 'error'].includes(name)) {
+                    cancelDictationPause();
+                }
                 const reason = name === 'error'
                     ? ({ 1: 'media-aborted', 2: 'media-network', 3: 'media-decode', 4: 'media-unsupported' }[element.error?.code] || 'media-failed') : '';
                 publishPlaybackState(name === 'error' ? 'error' : name === 'ended' ? 'ended' : undefined, reason);
@@ -677,16 +698,17 @@
 
     // A native replay may use a cached blob, or play before fetch resolves.
     // Only a fresh explicit selection can establish ownership without capture.
-    const pendingIntentForAudio = (element, playSequence) => {
+    const pendingIntentForAudio = (element, playSequence, confirmingPlay = false) => {
         const intent = readAloudIntent;
         if (!intent || playerSession.intent === intent
-            || Date.now() - intent.startedAt > READ_ALOUD_AUDIO_ASSOCIATION_WINDOW_MS
+            || (!confirmingPlay && Date.now() - intent.startedAt > READ_ALOUD_AUDIO_ASSOCIATION_WINDOW_MS)
             || playSequence <= intent.playSequence || extensionOwnedAudioElements.has(element)
             || element.srcObject) return null;
         const source = getAudioSource(element);
         if (!source.startsWith('blob:') && !isReadAloudResponseUrl(source)) return null;
         const owner = playerSession.audioElement;
-        if (!playerSession.isClosed && hasElementSource(owner) && owner !== element && !owner.ended) return null;
+        if (!playerSession.isClosed && hasElementSource(owner) && owner !== element
+            && !owner.ended && !playerSession.playbackEnded) return null;
         return intent;
     };
 
@@ -784,6 +806,7 @@
 
     const applyPlayerSettings = (settings = {}) => {
         playerSettings = normalizePlayerSettings({ ...playerSettings, ...settings });
+        if (!playerSettings.pauseWhileDictating) cancelDictationPause();
         playbackRate = playerSettings.playbackRate;
         const currentAudio = playerSession.audioElement || audio;
         if (currentAudio) currentAudio.playbackRate = playbackRate;
@@ -1062,6 +1085,11 @@
 
         updateSpeedUi();
         updatePlayPauseLabel();
+        if (dictationStatusLabel) {
+            const message = dictationNotice || (dictationPause?.state === 'paused' ? 'Paused for dictation' : '');
+            dictationStatusLabel.textContent = message;
+            dictationStatusLabel.style.display = message ? 'block' : 'none';
+        }
         updateTimeDisplay();
     };
 
@@ -1132,6 +1160,7 @@
         timeSeparatorLabel = null;
         durationLabel = null;
         trackTitleLabel = null;
+        dictationStatusLabel = null;
         downloadBtn = null;
         speedBtn = null;
         speedMenu = null;
@@ -1143,6 +1172,7 @@
     };
 
     const closePlayer = (reason = 'user') => {
+        cancelDictationPause();
         playerSession.isClosed = true;
         publishPlaybackState('closed', reason);
         const currentAudio = getActiveAudio();
@@ -1323,6 +1353,7 @@
         expandedTransportDiv.appendChild(playbackGroupDiv);
         backBtn = createIconButton('backward', skipLabel('back', playerSettings.skipBackSeconds), 36);
         backBtn.onclick = () => {
+            cancelDictationPause();
             const currentAudio = getActiveAudio();
             if (!currentAudio) return;
             audio = currentAudio;
@@ -1333,9 +1364,10 @@
             updateTimeDisplay();
         };
         playPauseBtn = createIconButton('play', 'Play', 40);
-        playPauseBtn.onclick = () => { void toggleSessionPlayback(); };
+        playPauseBtn.onclick = () => { cancelDictationPause(); void toggleSessionPlayback(); };
         forwardBtn = createIconButton('forward', skipLabel('forward', playerSettings.skipForwardSeconds), 36);
         forwardBtn.onclick = () => {
+            cancelDictationPause();
             const currentAudio = getActiveAudio();
             if (!currentAudio) return;
             audio = currentAudio;
@@ -1359,6 +1391,7 @@
         seekBar.value = '0';
         seekBar.setAttribute('aria-label', 'Playback position');
         seekBar.oninput = () => {
+            cancelDictationPause();
             const currentAudio = getActiveAudio();
             const timeline = getAudioTimeline();
             if (!currentAudio || !timeline?.canSeek) return;
@@ -1383,7 +1416,10 @@
         timeSeparatorLabel = null;
         timesRowDiv.append(currentTimeLabel, seekStatusLabel, durationLabel);
         contentDiv.append(listeningRow, seekBar, timesRowDiv);
-        controlsDiv.append(titleBarDiv, contentDiv);
+        dictationStatusLabel = make('div', 'ae-dictation-status');
+        dictationStatusLabel.setAttribute('role', 'status');
+        dictationStatusLabel.style.display = 'none';
+        controlsDiv.append(titleBarDiv, dictationStatusLabel, contentDiv);
         document.body.appendChild(controlsDiv);
         queueUi = window.AEPlayerReadingQueue?.create({
             document, container: controlsDiv, toggleHost: rightGroup,
@@ -1532,6 +1568,97 @@
         return true;
     };
 
+    const cancelDictationPause = () => {
+        dictationRevision += 1;
+        dictationResume = null;
+        dictationPause = null;
+        dictationNotice = '';
+    };
+
+    const pauseForDictation = () => {
+        const owner = playerSession.audioElement;
+        if (!owner || playerSession.isClosed || owner.paused || owner.ended) return;
+        const capturedOwner = owner === playerSession.capturedPlaybackElement;
+        if (!capturedOwner && playerSession.capturedPlaybackState !== CAPTURED_PLAYBACK_STATE.READY) return;
+        // One attempt at the recording edge. Readiness/UI updates never retry.
+        const pending = { session: playerSession, state: 'pausing', owner: null };
+        dictationPause = pending;
+        try {
+            if (capturedOwner) owner.pause();
+            else if (!handoffToCapturedPlayback()) { cancelDictationPause(); return; }
+            if (dictationPause !== pending) return;
+            pending.owner = playerSession.audioElement;
+            pending.state = 'paused';
+            publishPlaybackState('paused');
+        } catch (_error) {
+            cancelDictationPause();
+            dictationNotice = 'Pause unavailable for dictation';
+        }
+    };
+
+    const waitForDictationSeek = (owner) => new Promise((resolve, reject) => {
+        let timer;
+        const finish = (error) => {
+            owner.removeEventListener('seeked', settled);
+            owner.removeEventListener('error', failed);
+            owner.removeEventListener('emptied', failed);
+            clearTimeout(timer);
+            if (error) reject(error);
+            else resolve();
+        };
+        const settled = () => { if (!owner.seeking) finish(); };
+        const failed = () => finish(new Error('Dictation rewind did not settle.'));
+        owner.addEventListener('seeked', settled);
+        owner.addEventListener('error', failed);
+        owner.addEventListener('emptied', failed);
+        timer = setTimeout(failed, DICTATION_SEEK_TIMEOUT_MS);
+        settled();
+    });
+
+    const finishDictationPause = async () => {
+        const pending = dictationPause;
+        cancelDictationPause();
+        if (!pending || pending.state !== 'paused' || pending.session !== playerSession
+            || playerSession.isClosed || pending.owner !== playerSession.audioElement
+            || !pending.owner.paused || pending.owner.ended || !playerSettings.pauseWhileDictating
+            || dictationInvalidated) return;
+        const resume = { owner: pending.owner, revision: dictationRevision };
+        try {
+            try {
+                pending.owner.currentTime = Math.max(0, pending.owner.currentTime - DICTATION_REWIND_SECONDS);
+            } catch (_error) {
+                // Regaining context is best effort; a failed seek must not block resume.
+            }
+            if (pending.owner.seeking) await waitForDictationSeek(pending.owner);
+            // A manual action or a new recording may take over while seeking.
+            if (resume.revision !== dictationRevision || pending.session !== playerSession
+                || pending.owner !== playerSession.audioElement || !pending.owner.paused
+                || playerSession.isClosed || dictationState === 'recording'
+                || dictationInvalidated || !playerSettings.pauseWhileDictating) return;
+            dictationResume = resume;
+            let playing;
+            try { playing = pending.owner.play(); }
+            finally { dictationResume = null; }
+            const playSequence = audioPlayAttempts.get(pending.owner);
+            await playing;
+            // A delayed play promise must not revive a closed/replaced session
+            // or leak audio into a newly started dictation session.
+            if (resume.revision !== dictationRevision || pending.session !== playerSession || playerSession.isClosed || dictationState === 'recording'
+                || dictationInvalidated || !playerSettings.pauseWhileDictating) {
+                if (audioPlayAttempts.get(pending.owner) === playSequence) pending.owner.pause();
+                return;
+            }
+            dictationResume = null;
+            publishPlaybackState();
+        } catch (_error) {
+            dictationResume = null;
+            if (resume.revision === dictationRevision && pending.session === playerSession && !playerSession.isClosed) {
+                dictationNotice = 'Resume unavailable. Press Play to continue.';
+            }
+        }
+        updateControlState();
+    };
+
     const toggleSessionPlayback = async () => {
         const currentAudio = getActiveAudio();
         if (!currentAudio || !hasAudioSource(currentAudio)) return;
@@ -1628,6 +1755,7 @@
     };
 
     const beginPlayerSession = (intent, startedPlaySequence = audioPlaySequence) => {
+        cancelDictationPause();
         const sessionId = playerSession.id + 1;
         releaseCapturedPlaybackForSession(playerSession);
         playerSession = {
@@ -1787,6 +1915,7 @@
 
         if (typeof originalPlay === 'function') {
             mediaPrototype.play = function (...args) {
+                const isDictationResume = this === dictationResume?.owner;
                 const shouldTrack = isAudioElement(this);
                 const pendingIntent = shouldTrack ? pendingIntentForAudio(this, audioPlaySequence + 1) : null;
                 if (pendingIntent?.requestId && cancelledSpeechRequests.has(pendingIntent.requestId)) {
@@ -1818,8 +1947,11 @@
                             if (audioPlayAttempts.get(this) === playSequence) pauseAudioElement(this);
                             return;
                         }
+                        if (this === playerSession.audioElement && !this.paused) playerSession.playbackEnded = false;
                         audioPlaySequences.set(this, playSequence);
-                        if (pendingIntent && pendingIntentForAudio(this, playSequence) === pendingIntent
+                        // The association deadline applies when play is requested;
+                        // the browser may defer actual playback in a hidden tab.
+                        if (pendingIntent && pendingIntentForAudio(this, playSequence, true) === pendingIntent
                             && !cancelledSpeechRequests.has(pendingIntent.requestId)) {
                             bindIntentAudio(this, playSequence, pendingIntent);
                         }
@@ -1832,7 +1964,7 @@
                         }
                         checkObservedAudio();
                     }, error => {
-                        if (belongsToSession && isCurrentSession(sessionId) && !playerSession.isClosed
+                        if (!isDictationResume && belongsToSession && isCurrentSession(sessionId) && !playerSession.isClosed
                             && (!playerSession.audioElement || this === playerSession.audioElement)) {
                             publishPlaybackState('error', error?.name === 'NotAllowedError'
                                 ? 'autoplay-blocked' : 'play-rejected');
@@ -1932,6 +2064,40 @@
 
     document.addEventListener(SETTINGS_EVENT, (event) => {
         applyPlayerSettings(event.detail?.settings);
+        document.dispatchEvent(new CustomEvent('ae-read-aloud-player:dictation-request'));
+    });
+
+    document.addEventListener('ae-read-aloud-player:dictation', event => {
+        const { state, conversation } = event.detail || {};
+        if (!['starting', 'recording', 'transcribing', 'idle', 'unknown'].includes(state)) return;
+        // Unknown markup and settings snapshots do not establish a new
+        // recording. Rearm only after a confirmed end or new startup.
+        if (['starting', 'idle', 'transcribing'].includes(state)) dictationRecordingSeen = false;
+        const currentConversation = new URL(window.location.href).pathname.replace(/\/$/, '') || '/';
+        const navigated = dictationConversation !== null && dictationConversation !== conversation;
+        dictationConversation = conversation;
+        if (dictationInvalidated || conversation !== currentConversation || navigated || state === 'unknown') {
+            dictationState = 'unknown';
+            cancelDictationPause();
+            updateControlState();
+            return;
+        }
+        const previous = dictationState;
+        dictationState = state;
+        if (state === 'recording' && !dictationRecordingSeen) {
+            dictationRecordingSeen = true;
+            cancelDictationPause();
+            if (playerSettings.pauseWhileDictating) pauseForDictation();
+        } else if (previous === 'recording' && (state === 'idle' || state === 'transcribing')) {
+            void finishDictationPause();
+        } else if (state === 'starting') cancelDictationPause();
+        updateControlState();
+    });
+
+    document.addEventListener('ae-read-aloud-player:extension-invalidated', () => {
+        dictationInvalidated = true;
+        cancelDictationPause();
+        updateControlState();
     });
 
     document.addEventListener('ae-read-aloud-player:queue', event => {
@@ -1955,6 +2121,7 @@
 
     installThemeListener();
     requestPlayerSettings();
+    document.dispatchEvent(new CustomEvent('ae-read-aloud-player:dictation-request'));
 
     if (isPreviewMode) {
         initializePreviewMode();
