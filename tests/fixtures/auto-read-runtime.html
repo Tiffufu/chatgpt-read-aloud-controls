@@ -84,38 +84,60 @@
   const t=await tab(sharedStorage(true),{history:turn('old','Old answer')});await t.send('new');assert(t.clicks.join(',')==='new','new response did not start');t.doc.dispatchEvent(new Event('visibilitychange'));await settle();assert(t.clicks.length===1,'focus repeated playback');
  });
  await check('A first answer survives project chat URL assignment after submit acknowledgement',async()=>{
-  const t=await tab(sharedStorage(true),{href:'https://chatgpt.com/g/g-p-test/project'});
+  const t=await tab(sharedStorage(true),{href:'https://chatgpt.com/g/g-p-00000000000000000000000000000000/project'});
   t.doc.getElementById('prompt-textarea').textContent='First project prompt';t.doc.querySelector('button[aria-label="Send"]').click();
   const user=t.doc.createElement('div');user.setAttribute('data-turn-key','first-answer');user.innerHTML='<h4 data-conversation-role="user">You said:</h4><div data-user-message-bubble="true"><div dir="auto">First project prompt</div></div><button aria-label="Edit message"></button>';
   t.doc.querySelector('[aria-label="Conversation"]').append(user);await settle();
-  t.location.href='https://chatgpt.com/g/g-p-test/c/created';
+  t.location.href='https://chatgpt.com/g/g-p-00000000000000000000000000000000/c/created';
   user.insertAdjacentHTML('beforeend','<div data-talvt-turn-state="complete"><h4 data-conversation-role="assistant">ChatGPT said:</h4><div data-dil-message-id="first-message">First complete answer</div><button aria-label="Read aloud" aria-pressed="false"></button></div>');await settle();
   assert(t.clicks.join(',')==='first-answer','first answer was mistaken for loaded history');
  });
+ for(const timing of ['together','url-first','user-first','stop-first'])await check('First project answer survives ID/name URL alias when arrival order is '+timing,async()=>{
+  const project='g-p-00000000000000000000000000000000';
+  const shortUrl='https://chatgpt.com/g/'+project+'/project';
+  const namedUrl='https://chatgpt.com/g/'+project+'-project-name/c/created';
+  const t=await tab(sharedStorage(true),{href:shortUrl});
+  t.doc.getElementById('prompt-textarea').textContent='First project prompt';
+  t.doc.querySelector('button[aria-label="Send"]').click();
+  if(timing==='stop-first'){
+   t.doc.querySelector('main').insertAdjacentHTML('beforeend','<button aria-label="Stop generating"></button>');
+   await settle();t.doc.querySelector('[aria-label="Stop generating"]').remove();
+  }
+  const conversation=t.doc.querySelector('[aria-label="Conversation"]');
+  const user=t.doc.createElement('div');user.setAttribute('data-turn-key','first-answer');
+  user.innerHTML='<h4 data-conversation-role="user">You said:</h4><div data-user-message-bubble="true"><div dir="auto">First project prompt</div></div><button aria-label="Edit message"></button>';
+  if(timing==='user-first'){conversation.append(user);await settle();}
+  t.location.href=namedUrl;
+  if(timing==='url-first'){t.tick();await settle();}
+  user.insertAdjacentHTML('beforeend','<div data-talvt-turn-state="complete"><h4 data-conversation-role="assistant">ChatGPT said:</h4><div data-dil-message-id="first-message">First complete answer</div><button aria-label="Read aloud" aria-pressed="false"></button></div>');
+  if(timing!=='user-first')conversation.append(user);
+  await settle();t.tick();await settle();
+  assert(t.clicks.join(',')==='first-answer','first answer was lost or repeated');
+ });
  for(const timing of ['together','url-first','stop-first'])await check(`First project answer starts once when user and URL arrive ${timing}`,async()=>{
-  const t=await tab(sharedStorage(true),{href:'https://chatgpt.com/g/g-p-test/project'});
+  const t=await tab(sharedStorage(true),{href:'https://chatgpt.com/g/g-p-00000000000000000000000000000000/project'});
   t.doc.getElementById('prompt-textarea').textContent='First project prompt';t.doc.querySelector('button[aria-label="Send"]').click();
   if(timing==='stop-first'){t.doc.querySelector('main').insertAdjacentHTML('beforeend','<button aria-label="Stop generating"></button>');await settle();t.doc.querySelector('[aria-label="Stop generating"]').remove();}
-  t.location.href='https://chatgpt.com/g/g-p-test/c/created';
+  t.location.href='https://chatgpt.com/g/g-p-00000000000000000000000000000000/c/created';
   if(timing==='url-first'){t.tick();await settle();}
   t.doc.querySelector('[aria-label="Conversation"]').innerHTML=turn('first-answer','First complete answer').replace('<button aria-label="Edit message">','<div data-user-message-bubble="true"><div dir="auto">First project prompt</div></div><button aria-label="Edit message">');
   await settle();t.tick();await settle();assert(t.clicks.join(',')==='first-answer','first answer was lost or repeated');
  });
  await check('Opening old project history after Send does not inherit the first response',async()=>{
-  const t=await tab(sharedStorage(true),{href:'https://chatgpt.com/g/g-p-test/project'});
+  const t=await tab(sharedStorage(true),{href:'https://chatgpt.com/g/g-p-00000000000000000000000000000000/project'});
   t.doc.getElementById('prompt-textarea').textContent='New prompt';t.doc.querySelector('button[aria-label="Send"]').click();
-  t.location.href='https://chatgpt.com/g/g-p-test/c/history';
+  t.location.href='https://chatgpt.com/g/g-p-00000000000000000000000000000000/c/history';
   t.doc.querySelector('[aria-label="Conversation"]').innerHTML=turn('old-answer','Historical answer').replace('<button aria-label="Edit message">','<div data-user-message-bubble="true"><div dir="auto">Different old prompt</div></div><button aria-label="Edit message">');
   await settle();assert(t.clicks.length===0,'old history inherited pending submission');
  });
  for(const navigation of ['link','back'])await check(`Explicit ${navigation} navigation cannot inherit a pending identical prompt`,async()=>{
-  const t=await tab(sharedStorage(true),{href:'https://chatgpt.com/g/g-p-test/project'});
+  const t=await tab(sharedStorage(true),{href:'https://chatgpt.com/g/g-p-00000000000000000000000000000000/project'});
   t.doc.getElementById('prompt-textarea').textContent='Repeated prompt';t.doc.querySelector('button[aria-label="Send"]').click();
   if(navigation==='link'){
-   const link=t.doc.createElement('a');link.href='https://chatgpt.com/g/g-p-test/c/history';link.textContent='Old chat';t.doc.body.append(link);
+   const link=t.doc.createElement('a');link.href='https://chatgpt.com/g/g-p-00000000000000000000000000000000/c/history';link.textContent='Old chat';t.doc.body.append(link);
    link.addEventListener('click',e=>e.preventDefault());link.click();
   }
-  t.location.href='https://chatgpt.com/g/g-p-test/c/history';if(navigation==='back')t.back();
+  t.location.href='https://chatgpt.com/g/g-p-00000000000000000000000000000000/c/history';if(navigation==='back')t.back();
   t.doc.querySelector('[aria-label="Conversation"]').innerHTML=turn('old-answer','Historical answer').replace('<button aria-label="Edit message">','<div data-user-message-bubble="true"><div dir="auto">Repeated prompt</div></div><button aria-label="Edit message">');
   await settle();assert(t.clicks.length===0,'navigation inherited an identical prompt');
  });

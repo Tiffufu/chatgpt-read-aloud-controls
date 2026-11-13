@@ -7,8 +7,17 @@ const test = require('node:test');
 const root = path.resolve(__dirname, '..');
 const modulePath = path.join(root, 'src/js/auto-read-aloud.js');
 const load = () => fs.existsSync(modulePath) ? require(modulePath) : {};
+const PROJECT_ID = 'g-p-' + '0'.repeat(32);
+const OTHER_PROJECT_ID = 'g-p-' + '1'.repeat(32);
+const project = (conversation, id = PROJECT_ID, extra = {}) => ({
+    conversation, conversationScope: 'project:' + id, ...extra
+});
+const projectChat = (id = PROJECT_ID, chat = 'new-chat') => '/g/' + id + '-project-name/c/' + chat;
 const turn = (id, state = 'complete', signature = id) => ({ id, state, signature, hasText: true });
-const snapshot = (turns = [], extra = {}) => ({ conversation: '/c/test', userKey: 'user-1', generating: false, turns, ...extra });
+const snapshot = (turns = [], extra = {}) => ({
+    conversation: '/c/test', conversationScope: extra.conversationScope ?? extra.conversation ?? '/c/test',
+    userKey: 'user-1', generating: false, ...extra, turns
+});
 
 function harness(initial = snapshot(), options = {}) {
     const { createAutoReadController } = load();
@@ -81,25 +90,25 @@ test('an acknowledged submission remains eligible when the earlier user turn is 
 });
 
 test('assigning a new project chat URL preserves an acknowledged complete-only first answer', () => {
-    const conversation = '/g/g-p-test/project';
-    const h = harness(snapshot([], { conversation, userKey: '', userKeys: [] }));
+    const conversation = '/g/' + PROJECT_ID + '/project';
+    const h = harness(snapshot([], project(conversation, PROJECT_ID, { userKey: '', userKeys: [] })));
     h.controller.beginGeneration();
-    h.scan([], { conversation, userKey: 'submitted-user', userKeys: ['submitted-user'] });
-    h.scan([turn('first-answer')], {
-        conversation: '/g/g-p-test/c/new-chat', userKey: 'submitted-user', userKeys: ['submitted-user']
-    });
+    h.scan([], project(conversation, PROJECT_ID, { userKey: 'submitted-user', userKeys: ['submitted-user'] }));
+    h.scan([turn('first-answer')], project(projectChat(), PROJECT_ID, {
+        userKey: 'submitted-user', userKeys: ['submitted-user']
+    }));
     assert.deepEqual(h.starts.map(item => item.id), ['first-answer']);
 });
 
 for (const timing of ['together', 'url-first', 'user-first']) {
-    test(`first project response starts once when URL and submitted user arrive ${timing}`, () => {
-        const conversation = '/g/g-p-test/project';
-        const h = harness(snapshot([], { conversation, userKey: '', userKeys: [] }));
+    test('first project response survives ID/name URL alias when URL and user arrive ' + timing, () => {
+        const conversation = '/g/' + PROJECT_ID + '/project';
+        const h = harness(snapshot([], project(conversation, PROJECT_ID, { userKey: '', userKeys: [] })));
         h.controller.beginGeneration(null, 'submitted-prompt-fingerprint');
         const user = { userKey: 'submitted-user', userKeys: ['submitted-user'], userSignature: 'submitted-prompt-fingerprint' };
-        if (timing === 'user-first') h.scan([], { conversation, ...user });
-        if (timing === 'url-first') h.scan([], { conversation: '/g/g-p-test/c/new', userKey: '', userKeys: [] });
-        const completed = { conversation: '/g/g-p-test/c/new', ...user };
+        if (timing === 'user-first') h.scan([], project(conversation, PROJECT_ID, user));
+        if (timing === 'url-first') h.scan([], project(projectChat(), PROJECT_ID, { userKey: '', userKeys: [] }));
+        const completed = project(projectChat(), PROJECT_ID, user);
         h.scan([turn('first-answer')], completed);
         h.scan([turn('first-answer')], completed);
         assert.deepEqual(h.starts.map(item => item.id), ['first-answer']);
@@ -107,35 +116,39 @@ for (const timing of ['together', 'url-first', 'user-first']) {
 }
 
 test('a user acknowledged before URL assignment does not require recognizable prompt markup', () => {
-    const h = harness(snapshot([], { conversation: '/g/g-p-test/project', userKey: '', userKeys: [] }));
+    const conversation = '/g/' + PROJECT_ID + '/project';
+    const h = harness(snapshot([], project(conversation, PROJECT_ID, { userKey: '', userKeys: [] })));
     h.controller.beginGeneration(null, 'submitted-prompt-fingerprint');
-    h.scan([], { conversation: '/g/g-p-test/project', userKey: 'submitted-user', userSignature: null });
-    h.scan([turn('first-answer')], { conversation: '/g/g-p-test/c/new', userKey: 'submitted-user', userSignature: null });
+    h.scan([], project(conversation, PROJECT_ID, { userKey: 'submitted-user', userSignature: null }));
+    h.scan([turn('first-answer')], project(projectChat(), PROJECT_ID, { userKey: 'submitted-user', userSignature: null }));
     assert.deepEqual(h.starts.map(item => item.id), ['first-answer']);
 });
 
-test('a generation control without a user does not discard the pending first prompt match', () => {
-    const h = harness(snapshot([], { conversation: '/g/g-p-test/project', userKey: '', userKeys: [] }));
+test('a generation control without a user does not discard the pending first prompt match across a project URL alias', () => {
+    const conversation = '/g/' + PROJECT_ID + '/project';
+    const h = harness(snapshot([], project(conversation, PROJECT_ID, { userKey: '', userKeys: [] })));
     h.controller.beginGeneration(null, 'submitted-prompt-fingerprint');
-    h.scan([], { conversation: '/g/g-p-test/project', userKey: '', userKeys: [], generating: true });
-    h.scan([turn('first-answer')], { conversation: '/g/g-p-test/c/new', userKey: 'submitted-user',
-        userKeys: ['submitted-user'], userSignature: 'submitted-prompt-fingerprint' });
+    h.scan([], project(conversation, PROJECT_ID, { userKey: '', userKeys: [], generating: true }));
+    h.scan([turn('first-answer')], project(projectChat(), PROJECT_ID, {
+        userKey: 'submitted-user', userKeys: ['submitted-user'], userSignature: 'submitted-prompt-fingerprint'
+    }));
     assert.deepEqual(h.starts.map(item => item.id), ['first-answer']);
 });
 
 for (const scenario of ['different-prompt', 'different-project', 'expired', 'cancelled']) {
-    test(`a pending first project submission cannot narrate history: ${scenario}`, (t) => {
+    test('a pending first project submission cannot narrate history: ' + scenario, (t) => {
         let now = 1000;
         t.mock.method(Date, 'now', () => now);
-        const h = harness(snapshot([], { conversation: '/g/g-p-test/project', userKey: '', userKeys: [] }));
+        const conversation = '/g/' + PROJECT_ID + '/project';
+        const h = harness(snapshot([], project(conversation, PROJECT_ID, { userKey: '', userKeys: [] })));
         h.controller.beginGeneration(null, 'submitted-prompt-fingerprint');
         if (scenario === 'expired') now += 16000;
         if (scenario === 'cancelled') h.controller.cancelGeneration();
-        h.scan([turn('historical')], {
-            conversation: scenario === 'different-project' ? '/g/g-p-other/c/history' : '/g/g-p-test/c/history',
+        const id = scenario === 'different-project' ? OTHER_PROJECT_ID : PROJECT_ID;
+        h.scan([turn('historical')], project(projectChat(id, 'history'), id, {
             userKey: 'old-user', userKeys: ['old-user'],
             userSignature: scenario === 'different-prompt' ? 'old-prompt-fingerprint' : 'submitted-prompt-fingerprint'
-        });
+        }));
         assert.deepEqual(h.starts, []);
     });
 }

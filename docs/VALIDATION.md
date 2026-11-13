@@ -1,5 +1,19 @@
 # Validation summary
 
+## Project URL alias follow-up (#5)
+
+Recorded November 13, 2026 for the project URL display-name alias regression:
+
+- The full Node suite passed **163/163 tests**. New cases cover project ID/name
+  aliases with URL and user arrival together or in either order, an earlier
+  generation control, and rejection of mismatched prompts, other projects,
+  expired submissions, and cancelled submissions.
+- Production JavaScript syntax checks, manifest parsing, and `git diff --check`
+  passed.
+- `tests/fixtures/auto-read-runtime.html` passed **40/40** checks and
+  `tests/fixtures/auto-read-aloud.html` passed **10/10** in Chrome.
+- A fresh live ChatGPT first-project-message smoke check remains outstanding.
+
 ## v0.4.0 release verification
 
 Recorded November 2, 2026 after repairing first-message admission when a project chat URL arrives before or with its user message, in addition to seek-completion gating, durable generation acknowledgement, and playback completion:

@@ -183,8 +183,8 @@
                 // The first URL may arrive before the submitted user node. Keep
                 // that empty handoff only within its project and submit window;
                 // admission still requires the matching prompt fingerprint.
-                const sameScope = current.conversation.replace(/\/project$/, '').replace(/\/$/, '')
-                    === value.conversation.split('/c/')[0];
+                const sameScope = (current.conversationScope ?? current.conversation)
+                    === (value.conversationScope ?? value.conversation);
                 const pendingFirst = generationOpen && firstSubmission && sameScope
                     && Date.now() - requestedAt <= 15000
                     && ((!value.userKey && !value.turns.length)
@@ -489,6 +489,12 @@
             };
         };
         const conversation = () => new URL(location.href).pathname.replace(/\/$/, '') || '/';
+        // Project chat URLs may append a display-name slug to the same 32-hex project ID.
+        const conversationScope = () => {
+            const path = conversation();
+            const project = path.match(/^\/g\/(g-p-[0-9a-f]{32})(?:-[^/]+)?(?:\/project|\/c\/[^/]+)$/i);
+            return project ? 'project:' + project[1].toLowerCase() : path;
+        };
         return {
             dictationState() {
                 if (document.querySelector('button[aria-label="Cancel transcription"]')) return 'transcribing';
@@ -506,7 +512,7 @@
                 const userBody = lastUser?.matches('[data-message-author-role="user"]') ? lastUser
                     : lastUser?.querySelector('[data-user-message-bubble] [dir="auto"]');
                 return {
-                    conversation: conversation(), userKey: lastUser ? responseId(lastUser) : '',
+                    conversation: conversation(), conversationScope: conversationScope(), userKey: lastUser ? responseId(lastUser) : '',
                     userSignature: promptSignature(userBody?.innerText || userBody?.textContent),
                     userKeys: Array.from(users, responseId),
                     generating: Boolean(document.querySelector(STOP)),

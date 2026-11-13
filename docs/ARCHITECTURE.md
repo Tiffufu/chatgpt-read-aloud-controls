@@ -109,6 +109,10 @@ successfully queued. Scheduled starts defer their native click to avoid the
 browser's reentrant click guard. Pending clicks are cancelled with pending starts. Automatic admission
 can be disabled without stopping the manually selected queue.
 
+The ChatGPT adapter supplies an opaque conversation scope to the scheduler.
+Project chat URLs use the stable project ID for that scope, so a display-name
+slug added during URL assignment does not invalidate the pending first response.
+
 The adapter prefers `[data-markdown-text-style="assistant-message"]` for answer
 text, with the older message-body selectors retained as fallbacks. User text,
 assistant role headings, and unrelated tool markdown do not supply excerpts when
