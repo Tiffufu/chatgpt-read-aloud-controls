@@ -79,6 +79,20 @@
             snippet: createSnippet(item.snippet || records.get(item.id)?.snippet || 'Response'),
             source: item.source === 'manual' ? 'manual' : 'automatic'
         });
+        const retainSelections = (next, previous) => {
+            const selections = [...queue, ...undoItems.map(value => value.item), activeItem].filter(Boolean);
+            for (const item of selections) {
+                const known = previous.get(item.id);
+                const visible = next.get(item.id);
+                if (!known?.hasText || known.state !== 'complete') continue;
+                const unavailable = !visible || (visible.state !== 'generating' && visible.state !== 'cancelled'
+                    && (!visible.hasText || (visible.state === 'tool' && visible.signature === known.signature)));
+                if (!unavailable) continue;
+                // Keep only bounded values for selected replies, never detached
+                // message nodes or an archive of the whole conversation.
+                next.set(item.id, { ...serialize(known), state: 'complete', hasText: true, eligible: false, handled: true });
+            }
+        };
         const getSnapshot = () => ({
             items: queue.filter(valid).map(serialize),
             current: playback.state !== 'closed' && activeItem ? serialize(activeItem) : null,
@@ -160,7 +174,7 @@
                 if (attempt !== pending) return;
                 const message = pending.clicked
                     ? 'Read Aloud playback was not confirmed within 15 seconds.' + RECOVER
-                    : 'ChatGPT’s Read Aloud button was unavailable for 15 seconds.' + RECOVER;
+                    : 'ChatGPT’s Read Aloud button was unavailable for 15 seconds. Scroll to the response and choose Retry, or start Read Aloud manually.';
                 suspended = true;
                 clearAttempt(true);
                 if (playback.state === 'starting') playback = { ...playback, state: 'error' };
@@ -173,7 +187,7 @@
             if (!current) { baseline(value); emit(); return; }
             // An existing conversation hydrates after document_start. Its first
             // loaded user turn is history, not evidence of a fresh submission.
-            if (!current.userKey && !current.turns.length && !generationOpen
+            if (!current.userKey && !current.turns.length && !records.size && !generationOpen
                 && !value.generating && /\/c\//.test(value.conversation)) {
                 baseline(value);
                 emit();
@@ -253,6 +267,7 @@
                     queue.push({ ...serialize(record), source: 'automatic' });
                 }
             });
+            retainSelections(nextRecords, records);
             records = nextRecords;
             current = value;
             queue = queue.filter(valid);
@@ -277,12 +292,16 @@
             publish: () => emit(true),
             setEnabled(value, snapshot) {
                 if (enabled === value && current) { scan(snapshot); return; }
+                const sameConversation = current?.conversation === snapshot.conversation;
                 enabled = value;
+                if (!sameConversation) clearQueue();
                 queue = queue.filter(item => item.source === 'manual');
                 if (attempt && !queue.includes(attempt.item)) clearAttempt(true);
                 suspended = false;
                 undoItems = [];
+                const previousRecords = records;
                 baseline(snapshot);
+                if (sameConversation) retainSelections(records, previousRecords);
                 queue = queue.filter(item => records.get(item.id)?.signature === item.signature)
                     .map(item => { item.revision = records.get(item.id).revision; return item; });
                 if (activeItem && records.get(activeItem.id)?.signature === activeItem.signature) {

@@ -74,6 +74,13 @@ http://127.0.0.1:8002/tests/fixtures/reading-queue-preview.html?ae-words=2400&ae
 
 A saved live ChatGPT conversation is useful for replay compatibility, but opening its historical messages must not trigger automatic reading. Live automatic-reading checks need a newly submitted response. Controlled journey checks catch scheduler/media regressions; live checks detect changes to ChatGPT’s markup or native playback. Passing the fixture does not establish live compatibility.
 
+The journey also unloads a queued assistant node while paused, verifies its entry
+survives, remounts a new message wrapper, and checks real playback progression.
+The DOM runtime fixture separately recreates the complete node and native button,
+checks empty shells, unavailable-head timeout/Retry, off-screen Undo, observed
+revision invalidation, and a settings/navigation race. Response count alone is
+not a substitute for unloading the actual queued assistant message.
+
 The Node suite runs in CI. These browser fixtures currently run through a real browser separately; no Playwright CI runner is included. A future runner should execute the journey fixture, fail on its result and page errors, retain a failure trace, and keep authenticated live checks separate.
 
 ## Live smoke check
