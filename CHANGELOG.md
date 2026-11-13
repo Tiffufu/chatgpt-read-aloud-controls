@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Preserve queued replies, current-response metadata, and Undo when a long chat
+  temporarily unloads messages or leaves empty shells. Keep order through remounts
+  and retain off-screen manual selections when automatic reading is toggled.
+- Keep an unavailable queue head recoverable with scroll/Retry guidance instead
+  of silently removing it. Observed revisions and cancellation still invalidate
+  stale selections; navigation clears them even if a settings update arrives first.
+
 ## 0.4.0 — November 2, 2026
 
 ### Added

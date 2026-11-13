@@ -106,6 +106,12 @@ Reload the extension in `chrome://extensions`, then refresh the ChatGPT tab. An 
 
 Read the error in the drawer or extension popup. Use **Retry** when available, or start native Read Aloud manually. An unavailable native button or missing playback confirmation suspends the queue after 15 seconds. Browser autoplay rules, network errors, or ChatGPT site changes can also prevent a start.
 
+Long chats may temporarily unload off-screen messages. Your queued selection stays
+in place, but its native Read Aloud button must be rendered before it can start.
+Scroll back to the response and choose **Retry** if the queue has suspended.
+The extension does not jump your scroll position automatically. If a message was
+actually deleted, remove its retained queue entry manually.
+
 Intermittent automatic-start failures have been reported. If a failure persists, note whether the tab was refreshed after an extension update, whether it was in the background, and the error shown. Avoid including private conversation content in reports.
 
 ### Pause or seeking is temporarily unavailable

@@ -13,6 +13,11 @@ new permissions, services, or dependencies.
   generation cycle. Per-message rendering transitions alone are not sufficient. An acknowledged new user turn keeps that cycle eligible if a delayed render skips intermediate generation states; the 15-second stale-submit guard applies only until acknowledgement. That acknowledgement remains valid if earlier user nodes are unmounted. Assigning a new project chat’s URL also preserves a cycle already correlated with the same submitted user turn. When the URL arrives before or with the first user message, a matching in-memory prompt fingerprint permits admission within the same project. The fingerprint is neither persisted nor included in queue events. Unrecognized user-message markup leaves this fallback unavailable.
 - Eligible responses wait in completion order behind the tab's current playback,
   including manually started and paused playback.
+- Selected replies and Undo survive temporary message unloading and empty shells
+  in the same conversation. Retention uses bounded identifiers, revisions,
+  signatures, and snippets; it does not keep detached message nodes or prefetch
+  audio. A newly observed changed, generating, or cancelled revision invalidates
+  the older selection. DOM absence alone cannot distinguish unloading from deletion.
 - With optional dictation pause enabled, new queued starts also wait while ChatGPT dictation is starting or recording. Admission and ordering are unchanged. See [dictation behavior](USAGE.md#pause-audio-while-dictating-experimental) for preparation and automatic-stop limitations.
 - The queue advances on actual completion of the authoritative audio owner.
   Buffer completion and the handoff to captured playback do not advance it.
@@ -40,6 +45,9 @@ new permissions, services, or dependencies.
   tab's queue after 15 seconds. The drawer and popup show the failure; Retry
   restarts the pending response. Playback errors restore the interrupted response
   ahead of later entries. Clearing a failed queue releases its suspension.
+  If a queued response is unloaded when its turn arrives, its native action cannot
+  be clicked. It remains queued in order; scroll back to render it and choose Retry
+  if the queue has suspended. The extension does not automatically scroll the chat.
 
 ## Runtime boundary
 

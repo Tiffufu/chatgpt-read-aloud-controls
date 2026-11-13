@@ -128,6 +128,15 @@ Snapshots and commands use the `ae-read-aloud-player:queue`, `queue-request`, an
 Undo restores only entries still valid in the same conversation/revision. A
 confirmed playback failure restores its response ahead of later queued entries.
 
+DOM snapshots are a window onto long chats, not authoritative deletion notices.
+The controller retains compact metadata for queue, Undo, and current selections
+when their nodes disappear or become empty shells. Retained values exclude DOM
+nodes and native buttons; unselected history is not accumulated. Remounted text
+and generation/cancellation states validate or invalidate the retained revision.
+Settings rebaselining retains manual selections only within the same conversation.
+The adapter must still find a live matching native action before playback starts;
+an unavailable head keeps its existing timeout/Retry recovery instead of vanishing.
+
 Advancing a queue replaces the audio session without replacing the mounted player.
 While the new session has no bound page audio and its capture is loading or ready,
 both UI refresh paths retain the existing controls and display a disabled

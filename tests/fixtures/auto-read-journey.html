@@ -8,7 +8,7 @@ button{font:inherit;padding:8px 12px}.pass{color:#067647}.fail{color:#b42318}li{
 iframe{width:100%;height:600px;border:1px solid #aaa}pre{white-space:pre-wrap;font-size:12px}
 </style>
 <h1>Auto Read Aloud journey checks</h1>
-<p>Production adapter, queue, player, and real silent WAV playback. Six scenarios combine 40, 400, and 2,400-word responses with 3-, 30-, or 180-second media and short or long histories. Each checks a paused queue, completion, native cleanup, and a newly generated successor.</p>
+<p>Production adapter, queue, player, and real silent WAV playback. Six scenarios combine 40, 400, and 2,400-word responses with 3-, 30-, or 180-second media and short or long histories. Each checks a paused queue, queued-message unloading and remounting, completion, native cleanup, and a newly generated successor.</p>
 <button id="run">Run six journey checks</button>
 <p id="summary" role="status">Ready</p><ol id="results"></ol><pre id="failure"></pre><div id="preview"></div>
 <script>
@@ -34,6 +34,11 @@ document.getElementById('run').onclick=async()=>{
    doc.querySelector('#ae_enhanced_player [aria-label="Pause"]').click();await until(()=>queue.state==='paused');
    incoming();await until(()=>queue.items.length===1);const second=queue.items[0].id;
    assert(queue.current.id===first,'new response interrupted paused playback');
+   const queuedNode=doc.querySelector(`[data-message-id="${second}"]`);const remountedNode=queuedNode.cloneNode(true);queuedNode.remove();
+   await settle();await settle();assert(queue.items[0]?.id===second,'unloading queued assistant lost selection');
+   // Preserve the fixture's native action listener while using a new message node.
+   const nativeRead=queuedNode.querySelector('button[aria-label="Read aloud"]');remountedNode.querySelector('button[aria-label="Read aloud"]').replaceWith(nativeRead);
+   doc.getElementById('conversation').append(remountedNode);await settle();await settle();assert(queue.items[0]?.id===second,'remounting lost selection');
    doc.querySelector('#ae_enhanced_player [aria-label="Play"]').click();await until(()=>queue.state==='playing');
    doc.getElementById('finish').click();await until(()=>queue.state==='playing'&&queue.current?.id===second);
    doc.getElementById('finish').click();await until(()=>queue.state==='ended');

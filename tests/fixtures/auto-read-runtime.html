@@ -192,6 +192,50 @@
   t.publish('ended',{responseId:'one'});await settle();
   assert(t.clicks.join(',')==='one,two','manual queue did not advance with auto disabled');
  });
+ await check('Queued replies survive DOM unloading, empty shells, and fresh-node remounts in order',async()=>{
+  const t=await tab(sharedStorage(false),{history:turn('sample-a','Sample response A.')+turn('sample-b','Sample response B.')+turn('sample-c','Sample response C.')});
+  const read=id=>t.doc.querySelector(`[data-turn-key="${id}"] button[aria-label="Read aloud"]`).click();
+  read('sample-a');await settle();t.publish('paused',{responseId:'sample-a'});read('sample-b');read('sample-c');await settle();
+  t.doc.querySelector('[aria-label="Conversation"]').replaceChildren();await settle();t.tick();await settle();
+  assert(t.queue().items.map(x=>x.id).join(',')==='sample-b,sample-c','unloading lost queue order');
+  t.doc.querySelector('[aria-label="Conversation"]').innerHTML='<div data-turn-key="sample-b"><div data-talvt-turn-state="complete"></div></div>';await settle();
+  assert(t.queue().items.map(x=>x.id).join(',')==='sample-b,sample-c','empty shell invalidated a selection');
+  t.doc.querySelector('[aria-label="Conversation"]').innerHTML=turn('sample-a','Sample response A.')+turn('sample-b','Sample response B.')+turn('sample-c','Sample response C.');await settle();
+  t.publish('ended',{responseId:'sample-a'});await settle();assert(t.clicks.join(',')==='sample-a,sample-b','wrong first successor');
+  t.publish('ended',{responseId:'sample-b'});await settle();assert(t.clicks.join(',')==='sample-a,sample-b,sample-c','wrong second successor');
+  assert(!t.queue().items.length&&!t.queue().error,'finished queue did not drain cleanly');
+ });
+ await check('An unloaded queue head stays visible through timeout and Retry starts it after remount',async()=>{
+  const t=await tab(sharedStorage(false),{history:turn('sample-a','Sample response A.')+turn('sample-b','Sample response B.')});
+  t.doc.querySelector('[data-turn-key="sample-a"] button[aria-label="Read aloud"]').click();await settle();t.publish('paused',{responseId:'sample-a'});
+  t.doc.querySelector('[data-turn-key="sample-b"] button[aria-label="Read aloud"]').click();await settle();
+  t.doc.querySelector('[data-turn-key="sample-b"]').remove();await settle();t.publish('ended',{responseId:'sample-a'});await settle();t.expire();
+  assert(t.queue().items[0]?.id==='sample-b'&&t.queue().suspended,'unloaded head was silently discarded');
+  assert(/scroll/i.test(t.status().error),'missing response has no recovery guidance');
+  t.doc.querySelector('[aria-label="Conversation"]').insertAdjacentHTML('beforeend',turn('sample-b','Sample response B.'));await settle();
+  t.command('retry');await settle();assert(t.clicks.join(',')==='sample-a,sample-b','Retry did not start remounted response');
+ });
+ await check('Off-screen Undo and settings updates preserve manual selections but navigation clears them',async()=>{
+  const storage=sharedStorage(true),t=await tab(storage,{history:turn('sample-a','Sample response A.')});
+  t.publish('paused');t.doc.querySelector('button[aria-label="Read aloud"]').click();await settle();t.command('remove','sample-a');
+  t.doc.querySelector('[aria-label="Conversation"]').replaceChildren();await settle();
+  assert(t.queue().canUndo,'unloading discarded Undo');t.command('undo');storage.set(false);await settle();
+  assert(t.queue().items[0]?.id==='sample-a','settings discarded unloaded manual selection');
+  t.location.href='https://chatgpt.com/c/another-sample';t.tick();await settle();assert(!t.queue().items.length&&!t.queue().canUndo,'navigation retained stale selection');
+ });
+ await check('A settings change before the navigation scan cannot carry a selection into another chat',async()=>{
+  const storage=sharedStorage(true),t=await tab(storage,{history:turn('sample-a','Sample response A.')});
+  t.publish('paused');t.doc.querySelector('button[aria-label="Read aloud"]').click();await settle();
+  t.location.href='https://chatgpt.com/c/another-sample';storage.set(false);await settle();
+  assert(!t.queue().items.length&&!t.queue().canUndo,'settings retained the old conversation selection');
+  t.publish('ended');await settle();assert(!t.clicks.length,'navigation started old queued content');
+ });
+ await check('A remounted changed answer invalidates its older queued revision',async()=>{
+  const t=await tab(sharedStorage(false),{history:turn('sample-a','Sample response A.')});t.publish('paused');
+  t.doc.querySelector('button[aria-label="Read aloud"]').click();await settle();t.doc.querySelector('[aria-label="Conversation"]').replaceChildren();await settle();
+  t.doc.querySelector('[aria-label="Conversation"]').innerHTML=turn('sample-a','Revised sample response.');await settle();
+  assert(!t.queue().items.length,'changed reply retained stale queued text');t.publish('ended');await settle();assert(!t.clicks.length,'stale revision played');
+ });
  await check('Drawer commands reorder remove and undo the real runtime queue',async()=>{
   const t=await tab(sharedStorage(true));await t.send('first');t.publish('paused',{responseId:'first'});await t.send('second');await t.send('third');
   t.command('move','third',{direction:-1});assert(t.queue()?.items.map(x=>x.id).join(',')==='third,second','move command failed');

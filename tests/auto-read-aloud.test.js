@@ -20,6 +20,7 @@ function harness(initial = snapshot(), options = {}) {
     const controller = createAutoReadController({
         start: (item, requestId) => {
             if (options.missingAction) return false;
+            if (options.availableIds && !options.availableIds.has(item.id)) return false;
             starts.push({ id: item.id, requestId });
             return true;
         },
@@ -310,12 +311,12 @@ test('regeneration invalidates an older queued revision', () => {
     assert.deepEqual(h.starts.map(x => x.id), ['a']);
 });
 
-test('a missing or deleted queued response is discarded before starting', () => {
+test('a visibly cancelled queued response is discarded before starting', () => {
     const h = harness();
     h.state('playing');
     h.submit([turn('a')], { userKey: 'user-2' });
     h.submit([turn('a'), turn('b')], { userKey: 'user-3' });
-    h.scan([turn('b')], { userKey: 'user-3' });
+    h.scan([turn('a', 'cancelled'), turn('b')], { userKey: 'user-3' });
     h.state('ended');
     assert.deepEqual(h.starts.map(x => x.id), ['b']);
 });
@@ -369,13 +370,103 @@ test('initial hydration of an existing conversation does not look like a new sub
     assert.deepEqual(h.starts.map(x => x.id), ['fresh']);
 });
 
-test('a superseded pending start is cancelled when its response disappears', () => {
+test('a superseded pending start is cancelled when its response revision changes', () => {
     const cancelled = [];
     const h = harness(snapshot([turn('a', 'generating')], { generating: true }), { cancelled });
     h.scan([turn('a')]);
-    h.scan([]);
+    h.scan([turn('a', 'generating', 'revised')], { generating: true });
     assert.deepEqual(cancelled, [h.starts[0].requestId]);
 });
+
+test('manual queue order survives all message nodes unloading and remounting', () => {
+    const availableIds = new Set(['sample-a', 'sample-b']);
+    const h = harness(snapshot([turn('sample-a'), turn('sample-b')]), { availableIds });
+    h.enable(false);
+    h.state('paused', 1, { responseId: 'current' });
+    h.controller.enqueue('sample-a'); h.controller.enqueue('sample-b');
+    availableIds.clear();
+    h.scan([], { userKey: '', userKeys: [] });
+    h.scan([], { userKey: '', userKeys: [] });
+    assert.deepEqual(h.controller.getSnapshot().items.map(x => x.id), ['sample-a', 'sample-b']);
+    availableIds.add('sample-a'); availableIds.add('sample-b');
+    h.scan([turn('sample-a'), turn('sample-b')]);
+    h.state('ended');
+    assert.deepEqual(h.starts.map(x => x.id), ['sample-a']);
+    h.state('playing', 2, { responseId: 'sample-a', requestId: h.starts[0].requestId });
+    h.state('ended', 2, { responseId: 'sample-a' });
+    assert.deepEqual(h.starts.map(x => x.id), ['sample-a', 'sample-b']);
+});
+
+test('an unloaded queue head survives timeout and Retry without skipping the successor', () => {
+    const availableIds = new Set(['sample-a', 'sample-b']);
+    const h = harness(snapshot([turn('sample-a'), turn('sample-b')]), { availableIds });
+    h.state('paused');
+    h.controller.enqueue('sample-a'); h.controller.enqueue('sample-b');
+    availableIds.delete('sample-a');
+    h.scan([turn('sample-b')]); h.state('ended'); h.expire();
+    assert.deepEqual(h.starts, []);
+    assert.deepEqual(h.controller.getSnapshot().items.map(x => x.id), ['sample-a', 'sample-b']);
+    assert.equal(h.controller.getSnapshot().suspended, true);
+    assert.match(h.controller.getSnapshot().error, /scroll/i);
+    availableIds.add('sample-a');
+    h.scan([turn('sample-a'), turn('sample-b')]);
+    assert.deepEqual(h.starts, []);
+    h.controller.retry();
+    assert.deepEqual(h.starts.map(x => x.id), ['sample-a']);
+});
+
+test('an empty response shell preserves its selection until a real revision is visible', () => {
+    const h = harness(snapshot([turn('sample-a')]));
+    h.state('paused'); h.controller.enqueue('sample-a');
+    h.scan([{ ...turn('sample-a', 'tool', 'empty'), hasText: false }]);
+    assert.deepEqual(h.controller.getSnapshot().items.map(x => x.id), ['sample-a']);
+    h.scan([turn('sample-a', 'complete', 'new-text')]);
+    assert.deepEqual(h.controller.getSnapshot().items, []);
+});
+
+test('Undo and disabling auto read preserve unloaded manual selections', () => {
+    const h = harness(snapshot([turn('sample-a')]));
+    h.state('paused'); h.controller.enqueue('sample-a'); h.controller.remove('sample-a');
+    h.scan([], { userKey: '', userKeys: [] });
+    assert.equal(h.controller.getSnapshot().canUndo, true);
+    h.controller.undo(); h.enable(false);
+    assert.deepEqual(h.controller.getSnapshot().items.map(x => x.id), ['sample-a']);
+});
+
+test('unloading a clicked automatic start does not cancel its matching playback confirmation', () => {
+    const cancelled = [];
+    const h = harness(snapshot(), { cancelled });
+    h.submit([turn('sample-a')], { userKey: 'user-2' });
+    h.scan([]);
+    assert.deepEqual(cancelled, []);
+    assert.deepEqual(h.controller.getSnapshot().items.map(x => x.id), ['sample-a']);
+    h.state('playing', 1, { responseId: 'sample-a', requestId: h.starts[0].requestId });
+    assert.deepEqual(h.controller.getSnapshot().items, []);
+    assert.equal(h.controller.getSnapshot().current.id, 'sample-a');
+});
+
+for (const action of ['navigate', 'close', 'dispose']) {
+    test(`an unloaded selection cannot survive ${action}`, () => {
+        const h = harness(snapshot([turn('sample-a')]));
+        h.state('paused'); h.controller.enqueue('sample-a'); h.scan([]);
+        if (action === 'navigate') h.scan([], { conversation: '/c/another-sample' });
+        if (action === 'close') h.state('closed');
+        if (action === 'dispose') h.controller.dispose();
+        assert.deepEqual(h.controller.getSnapshot().items, []);
+        assert.equal(h.controller.getSnapshot().canUndo, false);
+    });
+}
+
+for (const copiedReply of [false, true]) {
+    test(`a settings update before the navigation scan clears old selections, copied reply: ${copiedReply}`, () => {
+        const h = harness(snapshot([turn('sample-a')]));
+        h.state('paused'); h.controller.enqueue('sample-a');
+        const destination = snapshot(copiedReply ? [turn('sample-a')] : [], { conversation: '/c/another-sample' });
+        h.controller.setEnabled(false, destination); h.controller.scan(destination);
+        assert.deepEqual(h.controller.getSnapshot().items, []);
+        assert.equal(h.controller.getSnapshot().canUndo, false);
+    });
+}
 
 test('a later unrelated playback cannot acknowledge an automatic start', () => {
     const h = harness(snapshot([turn('a', 'generating')], { generating: true }));
@@ -499,7 +590,7 @@ test('queue editing changes playback order and Undo restores only valid response
     h.controller.undo();
     assert.deepEqual(h.controller.getSnapshot().items.map(x => x.id), ['b', 'a', 'c']);
     h.controller.clear();
-    h.scan([turn('b'), turn('c')]);
+    h.scan([turn('a', 'cancelled'), turn('b'), turn('c')]);
     h.controller.undo();
     assert.deepEqual(h.controller.getSnapshot().items.map(x => x.id), ['b', 'c']);
     h.state('ended', 1);

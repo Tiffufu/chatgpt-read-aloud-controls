@@ -1,5 +1,31 @@
 # Validation summary
 
+## Unreleased queue preservation
+
+Recorded November 13, 2026:
+
+- Full Node suite: **173/173 passed**, including unloading/remounting, empty
+  shells, unavailable-head timeout/Retry, Undo, revision invalidation, and a
+  settings/navigation race. Five initial new controller cases failed before the
+  retention repair; the two added navigation-race cases also failed before their fix.
+- Production and modified fixture JavaScript syntax, manifest assets, and
+  whitespace checks passed.
+- `tests/fixtures/auto-read-runtime.html`: **41/41 passed** in Chrome. An old-code
+  control run with the first 40 cases passed **37/40** and failed the three new
+  unloading, timeout/recovery, and off-screen Undo cases.
+- `tests/fixtures/auto-read-journey.html`: **6/6 passed** in Chrome after each
+  scenario was extended to unload a queued assistant message and remount its
+  wrapper before real silent-WAV progression. These checks use invented sample
+  content and accelerated completion, not uninterrupted long-form listening.
+- Independent review found no remaining important issues after the
+  settings/navigation-race correction.
+
+The repaired runtime has not yet been reloaded and trialled on live ChatGPT or
+installed from a packaged ZIP. Missing/deleted messages are indistinguishable
+without a mounted revision: an unavailable queue head stays recoverable, and a
+truly deleted selection must be removed manually. The first-project-message URL
+alias defect is tracked separately and is not repaired by this change.
+
 ## v0.4.0 release verification
 
 Recorded November 2, 2026 after repairing first-message admission when a project chat URL arrives before or with its user message, in addition to seek-completion gating, durable generation acknowledgement, and playback completion:
